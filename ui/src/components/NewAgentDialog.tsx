@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@/lib/router";
 import { useDialog } from "../context/DialogContext";
 import { useCompany } from "../context/CompanyContext";
+import { useToast } from "../context/ToastContext";
 import { agentsApi } from "../api/agents";
 import { queryKeys } from "../lib/queryKeys";
 import { AGENT_ROLES } from "@paperclipai/shared";
@@ -23,6 +24,7 @@ import {
   User,
 } from "lucide-react";
 import { cn, agentUrl } from "../lib/utils";
+import { formatAgentReferenceAlias } from "../lib/reference-aliases";
 import { roleLabels } from "./agent-config-primitives";
 import { AgentConfigForm, type CreateConfigValues } from "./AgentConfigForm";
 import { defaultCreateValues } from "./agent-config-defaults";
@@ -32,6 +34,7 @@ import { AgentIcon } from "./AgentIconPicker";
 export function NewAgentDialog() {
   const { newAgentOpen, closeNewAgent } = useDialog();
   const { selectedCompanyId, selectedCompany } = useCompany();
+  const { pushToast } = useToast();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState(true);
@@ -85,8 +88,18 @@ export function NewAgentDialog() {
     mutationFn: (data: Record<string, unknown>) =>
       agentsApi.hire(selectedCompanyId!, data),
     onSuccess: (result) => {
+      const slackAlias = formatAgentReferenceAlias(result.agent.metadata ?? null);
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(selectedCompanyId!) });
       queryClient.invalidateQueries({ queryKey: queryKeys.approvals.list(selectedCompanyId!) });
+      pushToast({
+        title: result.approval ? "Agent hire submitted" : "Agent created",
+        body: slackAlias ? `Slack alias: ${slackAlias}` : undefined,
+        tone: "success",
+        action: {
+          label: "Open agent",
+          href: agentUrl(result.agent),
+        },
+      });
       reset();
       closeNewAgent();
       navigate(agentUrl(result.agent));

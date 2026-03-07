@@ -29,7 +29,9 @@
     "smoke:openclaw-sse-standalone": "./scripts/smoke/openclaw-sse-standalone.sh",
     "dev:slack-bot": "pnpm --filter @paperclipai/slack-bot start",
     "dev:stack": "node scripts/run-stack.mjs",
-    "start:stack": "node scripts/run-stack.mjs production"
+    "start:stack": "node scripts/run-stack.mjs production",
+    "docker:local:up": "bash scripts/start-local-docker-stack.sh",
+    "docker:local:down": "bash scripts/stop-local-docker-stack.sh"
   },
   "devDependencies": {
     "@changesets/cli": "^2.30.0",

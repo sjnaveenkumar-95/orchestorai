@@ -43,6 +43,7 @@ const projectFields = {
   leadAgentId: z.string().uuid().optional().nullable(),
   targetDate: z.string().optional().nullable(),
   color: z.string().optional().nullable(),
+  metadata: z.record(z.unknown()).optional().nullable(),
   archivedAt: z.string().datetime().optional().nullable(),
 };
 

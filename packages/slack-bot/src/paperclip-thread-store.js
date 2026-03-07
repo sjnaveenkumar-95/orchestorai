@@ -28,6 +28,9 @@ export class PaperclipThreadStore {
       mappings: {},
       issueIndex: {},
       fingerprints: {},
+      preferences: {
+        preferredChannels: {},
+      },
     };
   }
 
@@ -50,6 +53,16 @@ export class PaperclipThreadStore {
         mappings: parsed.mappings && typeof parsed.mappings === "object" ? parsed.mappings : {},
         issueIndex: parsed.issueIndex && typeof parsed.issueIndex === "object" ? parsed.issueIndex : {},
         fingerprints: parsed.fingerprints && typeof parsed.fingerprints === "object" ? parsed.fingerprints : {},
+        preferences:
+          parsed.preferences && typeof parsed.preferences === "object"
+            ? {
+                preferredChannels:
+                  parsed.preferences.preferredChannels &&
+                  typeof parsed.preferences.preferredChannels === "object"
+                    ? parsed.preferences.preferredChannels
+                    : {},
+              }
+            : { preferredChannels: {} },
       };
       this.pruneFingerprints();
     } catch {
@@ -122,5 +135,49 @@ export class PaperclipThreadStore {
       return false;
     }
     return Date.now() - toMillis(entry.createdAt) <= MAX_FINGERPRINT_AGE_MS;
+  }
+
+  setPreferredChannel(companyId, channelId) {
+    const normalizedCompanyId = String(companyId || "").trim();
+    const normalizedChannelId = String(channelId || "").trim();
+    if (!normalizedCompanyId || !normalizedChannelId) {
+      return;
+    }
+    this.state.preferences.preferredChannels[normalizedCompanyId] = {
+      channelId: normalizedChannelId,
+      updatedAt: nowIso(),
+    };
+    this.save();
+  }
+
+  getPreferredChannel(companyId) {
+    const normalizedCompanyId = String(companyId || "").trim();
+    if (!normalizedCompanyId) {
+      return "";
+    }
+
+    const stored = this.state.preferences.preferredChannels[normalizedCompanyId];
+    const storedChannelId = String(stored?.channelId || "").trim();
+    if (storedChannelId) {
+      return storedChannelId;
+    }
+
+    let latestChannelId = "";
+    let latestUpdatedAt = 0;
+    for (const mapping of Object.values(this.state.mappings)) {
+      if (String(mapping?.companyId || "").trim() !== normalizedCompanyId) {
+        continue;
+      }
+      const candidateChannelId = String(mapping?.channelId || "").trim();
+      if (!candidateChannelId) {
+        continue;
+      }
+      const updatedAt = Math.max(toMillis(mapping?.updatedAt), toMillis(mapping?.createdAt));
+      if (updatedAt >= latestUpdatedAt) {
+        latestUpdatedAt = updatedAt;
+        latestChannelId = candidateChannelId;
+      }
+    }
+    return latestChannelId;
   }
 }

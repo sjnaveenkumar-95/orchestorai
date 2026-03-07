@@ -38,14 +38,18 @@ export async function runCommand(opts: RunOptions): Promise<void> {
   p.log.message(pc.dim(`Config: ${configPath}`));
 
   if (!configExists(configPath)) {
-    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    const isInteractive = process.stdin.isTTY && process.stdout.isTTY;
+    if (!isInteractive && !opts.yes) {
       p.log.error("No config found and terminal is non-interactive.");
       p.log.message(`Run ${pc.cyan("paperclipai onboard")} once, then retry ${pc.cyan("paperclipai run")}.`);
       process.exit(1);
     }
 
+    if (!isInteractive && opts.yes) {
+      p.log.message(pc.dim("Non-interactive terminal detected; using quickstart onboarding defaults because --yes was set."));
+    }
     p.log.step("No config found. Starting onboarding...");
-    await onboard({ config: configPath, invokedByRun: true });
+    await onboard({ config: configPath, invokedByRun: true, yes: opts.yes });
   }
 
   p.log.step("Running doctor checks...");
@@ -102,8 +106,14 @@ function maybeEnableUiDevMiddleware(entrypoint: string): void {
 }
 
 async function importServerEntry(): Promise<void> {
-  // Dev mode: try local workspace path (monorepo with tsx)
   const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+  const distEntry = path.resolve(projectRoot, "server/dist/index.js");
+  if (process.env.NODE_ENV === "production" && fs.existsSync(distEntry)) {
+    await import(pathToFileURL(distEntry).href);
+    return;
+  }
+
+  // Dev mode: try local workspace path (monorepo with tsx)
   const devEntry = path.resolve(projectRoot, "server/src/index.ts");
   if (fs.existsSync(devEntry)) {
     maybeEnableUiDevMiddleware(devEntry);

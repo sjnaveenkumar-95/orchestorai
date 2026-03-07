@@ -5,14 +5,18 @@ import { handleSlackNativeAction } from "./slack-actions.js";
 import { PaperclipClient } from "./paperclip-client.js";
 import { PaperclipThreadStore } from "./paperclip-thread-store.js";
 import {
+  detectPaperclipCommentRequest,
   buildIssueDescription,
+  detectPaperclipSummaryRequest,
   detectTaskRequest,
   extractProjectSelectors,
+  extractIssueIdentifiers,
   fingerprintIssueComment,
   formatActivityNotification,
   formatChildIssueParentNotice,
   formatChildIssueThreadRootMessage,
   formatRunNotification,
+  getPrimaryReferenceAlias,
   hasPaperclipTrigger,
   resolveAssignee,
   resolveProject,
@@ -42,6 +46,16 @@ function slugify(value) {
 
 function normalizeId(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function formatAgentAliasLabel(agent) {
+  const alias = getPrimaryReferenceAlias(agent);
+  return alias ? `@${alias}` : agent?.name || "unknown";
+}
+
+function formatProjectAliasLabel(project) {
+  const alias = getPrimaryReferenceAlias(project);
+  return alias ? `project: ${alias}` : project?.name || "unknown";
 }
 
 function normalizeChannelType(channelType, channelId) {
@@ -82,6 +96,215 @@ function cleanSlackText(text) {
   return String(text || "")
     .replace(/<@[^>]+>/g, "")
     .trim();
+}
+
+function humanizeToken(value) {
+  return String(value || "unknown")
+    .replace(/_/g, " ")
+    .trim();
+}
+
+function truncateTextValue(value, max = 140) {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.length <= max) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(0, max - 3)).trimEnd()}...`;
+}
+
+function finishSentence(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  return /[.!?]$/.test(normalized) ? normalized : `${normalized}.`;
+}
+
+function extractIssueBrief(description) {
+  const lines = String(description || "")
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    if (
+      line.startsWith("```") ||
+      /^#{1,6}\s/.test(line) ||
+      /^[-*]\s/.test(line) ||
+      /^\d+\.\s/.test(line) ||
+      /^source\s*:/i.test(line)
+    ) {
+      continue;
+    }
+    const cleaned = truncateTextValue(line.replace(/`/g, ""), 180);
+    if (cleaned) {
+      return cleaned;
+    }
+  }
+  return "";
+}
+
+function formatCommentBodyForSlack(body) {
+  const lines = String(body || "")
+    .replace(/\r/g, "")
+    .replace(/`/g, "")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .split("\n");
+
+  const out = [];
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+      if (out.length > 0 && out[out.length - 1] !== "") {
+        out.push("");
+      }
+      continue;
+    }
+    if (/^#{1,6}\s*/.test(trimmed)) {
+      continue;
+    }
+    out.push(trimmed.replace(/^[-*]\s+/, ""));
+  }
+
+  while (out.length > 0 && out[0] === "") {
+    out.shift();
+  }
+  while (out.length > 0 && out[out.length - 1] === "") {
+    out.pop();
+  }
+
+  return out.join("\n");
+}
+
+function sortIssuesByRecentUpdate(issues) {
+  return [...(issues || [])].sort((left, right) => {
+    const leftValue = new Date(left?.updatedAt || left?.createdAt || 0).getTime();
+    const rightValue = new Date(right?.updatedAt || right?.createdAt || 0).getTime();
+    return rightValue - leftValue;
+  });
+}
+
+function formatOverviewIssueEntry(issue, agentsById) {
+  const identifier = String(issue?.identifier || "").trim();
+  const title = truncateTextValue(issue?.title || "Untitled issue", 90);
+  const status = humanizeToken(issue?.status);
+  const assigneeName = issue?.assigneeAgentId ? agentsById.get(String(issue.assigneeAgentId)) || "" : "";
+  const details = [status];
+  if (assigneeName) {
+    details.push(assigneeName);
+  }
+  const label = identifier ? `${identifier} ${title}` : title;
+  return `${label} (${details.join(", ")})`;
+}
+
+export function buildPaperclipIssueSummary({ issue, assigneeName = "", projectName = "", parentIdentifier = "" }) {
+  const identifier = String(issue?.identifier || "Paperclip issue").trim();
+  const title = truncateTextValue(issue?.title || "Untitled issue", 140);
+  const statusParts = [
+    `Status: ${humanizeToken(issue?.status)}`,
+    `Priority: ${humanizeToken(issue?.priority)}`,
+    `Assignee: ${assigneeName || "unassigned"}`,
+  ];
+  if (projectName) {
+    statusParts.push(`Project: ${projectName}`);
+  }
+
+  const brief = extractIssueBrief(issue?.description);
+  const contextParts = [];
+  if (parentIdentifier) {
+    contextParts.push(`Parent: ${parentIdentifier}`);
+  }
+  if (brief) {
+    contextParts.push(`Brief: ${brief}`);
+  }
+  if (contextParts.length === 0) {
+    contextParts.push(`Updated: ${humanizeToken(issue?.updatedAt || issue?.createdAt || "unknown")}`);
+  }
+
+  return [
+    "*Summary*",
+    `- ${identifier}: ${title}`,
+    `- ${finishSentence(statusParts.join(". "))}`,
+    `- ${finishSentence(contextParts.join(". "))}`,
+  ].join("\n");
+}
+
+export function buildPaperclipOverviewSummary({
+  issues,
+  agentsById = new Map(),
+  projectName = "",
+  scopeLabel = "",
+}) {
+  const visibleIssues = (issues || []).filter((issue) => !issue?.hiddenAt);
+  const scope = projectName
+    ? `in ${projectName}`
+    : scopeLabel
+      ? `for ${scopeLabel}`
+      : "in Paperclip";
+
+  if (visibleIssues.length === 0) {
+    return `*Summary*\n- No tickets found ${scope}.`;
+  }
+
+  const counts = new Map();
+  for (const issue of visibleIssues) {
+    const key = String(issue?.status || "unknown").trim() || "unknown";
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const orderedStatuses = ["todo", "in_progress", "in_review", "blocked", "done", "cancelled"];
+  const countSummary = [
+    ...orderedStatuses.filter((status) => counts.has(status)).map((status) => `${counts.get(status)} ${humanizeToken(status)}`),
+    ...Array.from(counts.entries())
+      .filter(([status]) => !orderedStatuses.includes(status))
+      .map(([status, count]) => `${count} ${humanizeToken(status)}`),
+  ].join(", ");
+
+  const openIssues = sortIssuesByRecentUpdate(
+    visibleIssues.filter((issue) => !["done", "cancelled"].includes(String(issue?.status || ""))),
+  );
+  const completedIssues = sortIssuesByRecentUpdate(
+    visibleIssues.filter((issue) => String(issue?.status || "") === "done"),
+  );
+
+  const activeLine =
+    openIssues.length > 0
+      ? `- Active: ${openIssues.slice(0, 3).map((issue) => formatOverviewIssueEntry(issue, agentsById)).join("; ")}`
+      : "- Active: none right now.";
+  const completedLine =
+    completedIssues.length > 0
+      ? `- Recent completions: ${completedIssues
+          .slice(0, 2)
+          .map((issue) => formatOverviewIssueEntry(issue, agentsById))
+          .join("; ")}`
+      : "- Recent completions: none yet.";
+
+  return [
+    "*Summary*",
+    `- ${visibleIssues.length} tickets ${scope}: ${countSummary}.`,
+    activeLine,
+    completedLine,
+  ].join("\n");
+}
+
+export function buildPaperclipLatestCommentSummary({
+  identifier,
+  comment,
+  authorName = "",
+}) {
+  const issueRef = String(identifier || "Paperclip issue").trim();
+  if (!comment) {
+    return `*Summary*\n- ${issueRef} has no comments yet.`;
+  }
+
+  const body = formatCommentBodyForSlack(comment.body);
+  const prefix = authorName
+    ? `Latest comment on ${issueRef} by ${authorName}`
+    : `Latest comment on ${issueRef}`;
+  return ["*Summary*", `${prefix}:`, body || "(empty comment)"].join("\n");
 }
 
 function parseReplyTag(text) {
@@ -390,6 +613,27 @@ export class SlackRuntime {
     return this.paperclipThreadStore.getMapping(event.channel, event.thread_ts);
   }
 
+  rememberPaperclipPreferredChannel({ channelId, channelType, event, options }) {
+    if (!this.paperclipThreadStore || !this.config?.paperclip?.companyId || !channelId) {
+      return;
+    }
+
+    if (channelType === "im") {
+      this.paperclipThreadStore.setPreferredChannel(this.config.paperclip.companyId, channelId);
+      return;
+    }
+
+    const text = String(event?.text || "");
+    const explicitPaperclipTrigger = hasPaperclipTrigger({
+      text,
+      botUserId: this.botUserId,
+      triggerMentions: this.config.paperclip.triggerMentions,
+    });
+    if (explicitPaperclipTrigger || this.isDirectBotMention(event, options)) {
+      this.paperclipThreadStore.setPreferredChannel(this.config.paperclip.companyId, channelId);
+    }
+  }
+
   rememberPaperclipRunIssues(runId, issues) {
     if (!runId) {
       return;
@@ -478,6 +722,186 @@ export class SlackRuntime {
     return await this.paperclipClient.getAgentName(agentId);
   }
 
+  buildPaperclipAgentNameMap(agents) {
+    return new Map(
+      (agents || [])
+        .map((agent) => [String(agent?.id || "").trim(), String(agent?.name || "").trim()])
+        .filter(([id, name]) => id && name),
+    );
+  }
+
+  resolveIssueParentIdentifier(issue) {
+    if (!issue?.parentId || !Array.isArray(issue?.ancestors)) {
+      return "";
+    }
+    const parent = issue.ancestors.find((entry) => String(entry?.id || "") === String(issue.parentId || ""));
+    return String(parent?.identifier || "").trim();
+  }
+
+  async maybeHandlePaperclipSummaryRequest({ event, mappedThread }) {
+    if (!this.paperclipClient) {
+      return false;
+    }
+
+    const request = detectPaperclipSummaryRequest({
+      text: event.text || "",
+      mappedIssueIdentifier: mappedThread?.issueIdentifier || "",
+    });
+    if (!request) {
+      return false;
+    }
+
+    const replyThreadTs = event.thread_ts || event.ts;
+
+    try {
+      const agents = await this.paperclipClient.listAgents();
+      const agentsById = this.buildPaperclipAgentNameMap(agents);
+
+      if (request.kind === "issue") {
+        const identifiers = request.issueIdentifiers.length > 0
+          ? request.issueIdentifiers
+          : extractIssueIdentifiers(event.text || "");
+        if (identifiers.length === 0) {
+          return false;
+        }
+
+        if (identifiers.length === 1) {
+          const issue = await this.paperclipClient.getIssue(identifiers[0]);
+          const summary = buildPaperclipIssueSummary({
+            issue,
+            assigneeName: issue?.assigneeAgentId ? agentsById.get(String(issue.assigneeAgentId)) || "" : "",
+            projectName: String(issue?.project?.name || "").trim(),
+            parentIdentifier: this.resolveIssueParentIdentifier(issue),
+          });
+          await this.postPaperclipThreadReply(event.channel, replyThreadTs, summary);
+          return true;
+        }
+
+        const matchedIssues = (
+          await Promise.all(
+            identifiers.map(async (identifier) => {
+              try {
+                return await this.paperclipClient.getIssue(identifier);
+              } catch {
+                return null;
+              }
+            }),
+          )
+        ).filter(Boolean);
+
+        const summary = buildPaperclipOverviewSummary({
+          issues: matchedIssues,
+          agentsById,
+          scopeLabel: "requested tickets",
+        });
+        await this.postPaperclipThreadReply(event.channel, replyThreadTs, summary);
+        return true;
+      }
+
+      let issues = await this.paperclipClient.listIssues();
+      let projectName = "";
+      const projectSelectors = extractProjectSelectors(event.text || "");
+      if (projectSelectors.length > 0) {
+        const projects = await this.paperclipClient.listProjects();
+        const project = resolveProject({
+          text: event.text || "",
+          projectMappings: this.config.paperclip.projectMappings,
+          projects,
+        });
+
+        if (project.kind !== "match") {
+          let message =
+            "I could not resolve a Paperclip project. Use `project: <project alias>` or an exact Paperclip project name.";
+          if (project.kind === "ambiguous" && Array.isArray(project.candidates) && project.candidates.length > 0) {
+            const names = project.candidates
+              .map((entry) => `${entry.name} (${formatProjectAliasLabel(entry)})`)
+              .filter(Boolean)
+              .join(", ");
+            if (names) {
+              message = `I found multiple possible projects: ${names}. Use one canonical project alias or one exact project name.`;
+            }
+          }
+          await this.postPaperclipThreadReply(event.channel, replyThreadTs, message);
+          return true;
+        }
+
+        projectName = String(project.project?.name || "").trim();
+        issues = issues.filter((issue) => String(issue?.projectId || "") === String(project.project.id || ""));
+      }
+
+      const summary = buildPaperclipOverviewSummary({
+        issues,
+        agentsById,
+        projectName,
+      });
+      await this.postPaperclipThreadReply(event.channel, replyThreadTs, summary);
+      return true;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      const missingIdentifier = request.kind === "issue" ? request.issueIdentifiers[0] || "" : "";
+      const message = /issue not found/i.test(reason) && missingIdentifier
+        ? `I could not find Paperclip issue ${missingIdentifier}.`
+        : `Paperclip summary failed: ${reason}`;
+      await this.postPaperclipThreadReply(event.channel, replyThreadTs, message);
+      return true;
+    }
+  }
+
+  async maybeHandlePaperclipCommentRequest({ event, mappedThread }) {
+    if (!this.paperclipClient) {
+      return false;
+    }
+
+    const request = detectPaperclipCommentRequest({
+      text: event.text || "",
+      mappedIssueIdentifier: mappedThread?.issueIdentifier || "",
+    });
+    if (!request) {
+      return false;
+    }
+
+    const replyThreadTs = event.thread_ts || event.ts;
+
+    try {
+      const identifier = request.issueIdentifiers[0] || "";
+      if (!identifier) {
+        return false;
+      }
+
+      const [issue, comments, agents] = await Promise.all([
+        this.paperclipClient.getIssue(identifier),
+        this.paperclipClient.listIssueComments(identifier),
+        this.paperclipClient.listAgents(),
+      ]);
+
+      const latestComment = Array.isArray(comments) && comments.length > 0 ? comments[0] : null;
+      const agentsById = this.buildPaperclipAgentNameMap(agents);
+      const authorName = latestComment?.authorAgentId
+        ? agentsById.get(String(latestComment.authorAgentId)) || ""
+        : latestComment?.authorUserId
+          ? String(latestComment.authorUserId) === "local-board"
+            ? "board"
+            : String(latestComment.authorUserId)
+          : "";
+
+      const summary = buildPaperclipLatestCommentSummary({
+        identifier: issue?.identifier || identifier,
+        comment: latestComment,
+        authorName,
+      });
+      await this.postPaperclipThreadReply(event.channel, replyThreadTs, summary);
+      return true;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      const missingIdentifier = request.issueIdentifiers[0] || "";
+      const message = /issue not found/i.test(reason) && missingIdentifier
+        ? `I could not find Paperclip issue ${missingIdentifier}.`
+        : `Paperclip comment lookup failed: ${reason}`;
+      await this.postPaperclipThreadReply(event.channel, replyThreadTs, message);
+      return true;
+    }
+  }
+
   async ensurePaperclipThreadMappingForIssue(issueId, options = {}, visited = new Set()) {
     if (!issueId || !this.paperclipThreadStore || !this.paperclipClient) {
       return null;
@@ -506,8 +930,54 @@ export class SlackRuntime {
 
     const task = (async () => {
       const issue = await this.paperclipClient.getIssue(normalizedIssueId);
-      if (!issue?.id || !issue.parentId) {
+      if (!issue?.id) {
         return null;
+      }
+
+      if (!issue.parentId) {
+        const fallbackChannelId = String(options.fallbackChannelId || "").trim();
+        if (!options.allowTopLevelRoot || !fallbackChannelId) {
+          return null;
+        }
+
+        const assigneeName =
+          issue.assigneeAgentId && this.paperclipClient
+            ? await this.paperclipClient.getAgentName(issue.assigneeAgentId)
+            : "";
+        const projectName = String(issue.project?.name || "").trim();
+        const issueIdentifier = String(issue.identifier || issue.id).trim();
+        const threadTs = await this.postPaperclipRootMessage(
+          fallbackChannelId,
+          formatChildIssueThreadRootMessage({
+            childIdentifier: issueIdentifier,
+            parentIdentifier: "",
+            title: issue.title,
+            assigneeName,
+            projectName,
+          }),
+        );
+
+        const mapping = this.paperclipThreadStore.putMapping({
+          channelId: fallbackChannelId,
+          threadTs,
+          companyId: issue.companyId || this.config.paperclip.companyId,
+          issueId: issue.id,
+          issueIdentifier: issue.identifier,
+          issueTitle: issue.title,
+          assigneeAgentId: issue.assigneeAgentId,
+          assigneeName,
+          projectId: issue.projectId || null,
+          projectName,
+          rootIssueId: issue.id,
+          rootIssueIdentifier: issue.identifier,
+          sourceMessageTs: threadTs,
+        });
+
+        this.log(
+          "info",
+          `paperclip top-level issue thread created issue=${issue.id} thread=${fallbackChannelId}:${threadTs}`,
+        );
+        return mapping;
       }
 
       const parentMapping =
@@ -629,8 +1099,11 @@ export class SlackRuntime {
         if (payload.runId) {
           this.rememberPaperclipRunIssues(payload.runId, [{ issueId: payload.entityId }]);
         }
+        const fallbackChannelId = this.paperclipThreadStore.getPreferredChannel(this.config.paperclip.companyId);
         await this.ensurePaperclipThreadMappingForIssue(payload.entityId, {
           notifyParentThread: true,
+          allowTopLevelRoot: payload.actorType === "user",
+          fallbackChannelId,
         });
         return;
       }
@@ -1519,6 +1992,22 @@ export class SlackRuntime {
     const replyThreadTs = mappedThread?.threadTs || event.thread_ts || event.ts;
 
     try {
+      const handledCommentLookup = await this.maybeHandlePaperclipCommentRequest({
+        event,
+        mappedThread,
+      });
+      if (handledCommentLookup) {
+        return true;
+      }
+
+      const handledSummary = await this.maybeHandlePaperclipSummaryRequest({
+        event,
+        mappedThread,
+      });
+      if (handledSummary) {
+        return true;
+      }
+
       if (mappedThread) {
         const hasTrigger = hasPaperclipTrigger({
           text: event.text || "",
@@ -1611,11 +2100,14 @@ export class SlackRuntime {
       });
 
       if (assignee.kind !== "match") {
-        let message = "I could not resolve a Paperclip assignee. Mention a mapped Slack user/alias or use an exact `@AgentName` from Paperclip.";
+        let message = "I could not resolve a Paperclip assignee. Mention the agent's Slack alias such as `@qa`, or use the agent's exact Paperclip name.";
         if (assignee.kind === "ambiguous" && Array.isArray(assignee.candidates) && assignee.candidates.length > 0) {
-          const names = assignee.candidates.map((agent) => agent.name).filter(Boolean).join(", ");
+          const names = assignee.candidates
+            .map((agent) => `${agent.name} (${formatAgentAliasLabel(agent)})`)
+            .filter(Boolean)
+            .join(", ");
           if (names) {
-            message = `I found multiple possible assignees: ${names}. Mention exactly one mapped user or one exact Paperclip agent name.`;
+            message = `I found multiple possible assignees: ${names}. Mention exactly one canonical alias or one exact Paperclip agent name.`;
           }
         }
         await this.postPaperclipThreadReply(event.channel, creationThreadTs, message);
@@ -1637,15 +2129,18 @@ export class SlackRuntime {
 
         if (project.kind !== "match") {
           let message =
-            "I could not resolve a Paperclip project. Use `project: <exact project name>` or a mapped project alias.";
+            "I could not resolve a Paperclip project. Use `project: <project alias>` or an exact Paperclip project name.";
           if (
             project.kind === "ambiguous" &&
             Array.isArray(project.candidates) &&
             project.candidates.length > 0
           ) {
-            const names = project.candidates.map((entry) => entry.name).filter(Boolean).join(", ");
+            const names = project.candidates
+              .map((entry) => `${entry.name} (${formatProjectAliasLabel(entry)})`)
+              .filter(Boolean)
+              .join(", ");
             if (names) {
-              message = `I found multiple possible projects: ${names}. Use one exact project name or one mapped alias.`;
+              message = `I found multiple possible projects: ${names}. Use one canonical project alias or one exact project name.`;
             }
           }
           await this.postPaperclipThreadReply(event.channel, creationThreadTs, message);
@@ -1785,6 +2280,12 @@ export class SlackRuntime {
     }
 
     if (channelType === "channel" || channelType === "group" || channelType === "im") {
+      this.rememberPaperclipPreferredChannel({
+        channelId: event.channel,
+        channelType,
+        event,
+        options,
+      });
       const handledByPaperclip = await this.maybeHandlePaperclipMessage({
         event,
         options,

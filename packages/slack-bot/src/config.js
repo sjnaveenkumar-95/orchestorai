@@ -1,8 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
 import dotenv from "dotenv";
+import { loadPaperclipEnvIntoProcess } from "./paperclip-env.js";
 
 dotenv.config();
+loadPaperclipEnvIntoProcess({
+  keys: [
+    "SLACK_BOT_TOKEN",
+    "SLACK_APP_TOKEN",
+    "SLACK_SIGNING_SECRET",
+    "SLACK_APP_ID",
+  ],
+});
 
 const DEFAULT_CONFIG_FILE = "slack-codex.config.json";
 

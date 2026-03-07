@@ -26,6 +26,8 @@ import { Identity } from "../components/Identity";
 import { PageSkeleton } from "../components/PageSkeleton";
 import { formatCents, formatDate, relativeTime, formatTokens } from "../lib/utils";
 import { cn } from "../lib/utils";
+import { formatAgentReferenceAlias } from "../lib/reference-aliases";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -429,6 +431,7 @@ export function AgentDetail() {
   if (error) return <p className="text-sm text-destructive">{error.message}</p>;
   if (!agent) return null;
   const isPendingApproval = agent.status === "pending_approval";
+  const slackAlias = formatAgentReferenceAlias(agent.metadata);
   const showConfigActionBar = activeView === "configure" && configDirty;
 
   return (
@@ -450,6 +453,14 @@ export function AgentDetail() {
               {roleLabels[agent.role] ?? agent.role}
               {agent.title ? ` - ${agent.title}` : ""}
             </p>
+            {slackAlias ? (
+              <div className="mt-2 flex items-center gap-2">
+                <Badge variant="secondary" className="font-mono text-[11px]">
+                  Slack: {slackAlias}
+                </Badge>
+                <CopyText text={slackAlias} />
+              </div>
+            ) : null}
           </div>
         </div>
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">

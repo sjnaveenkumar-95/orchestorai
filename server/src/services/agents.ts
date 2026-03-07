@@ -11,10 +11,20 @@ import {
   heartbeatRunEvents,
   heartbeatRuns,
 } from "@paperclipai/db";
-import { isUuidLike, normalizeAgentUrlKey } from "@paperclipai/shared";
+import {
+  isUuidLike,
+  normalizeAgentUrlKey,
+  readReferenceAliases,
+  type ReferenceAliases,
+} from "@paperclipai/shared";
 import { conflict, notFound, unprocessable } from "../errors.js";
 import { normalizeAgentPermissions } from "./agent-permissions.js";
 import { REDACTED_EVENT_VALUE, sanitizeRecord } from "../redaction.js";
+import {
+  applyResolvedReferenceAliases,
+  resolveEntityReferenceAliases,
+  stripResolvedReferenceAliases,
+} from "./reference-aliases.js";
 
 function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
@@ -59,6 +69,14 @@ interface AgentShortnameRow {
 
 interface AgentShortnameCollisionOptions {
   excludeAgentId?: string | null;
+}
+
+interface AgentReferenceRow {
+  id: string;
+  name: string;
+  metadata: Record<string, unknown> | null;
+  status: string;
+  createdAt: Date;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -189,11 +207,31 @@ export function agentService(db: Db) {
     };
   }
 
-  function normalizeAgentRow(row: typeof agents.$inferSelect) {
-    return withUrlKey({
+  async function listReferenceRows(companyId: string): Promise<AgentReferenceRow[]> {
+    return db
+      .select({
+        id: agents.id,
+        name: agents.name,
+        metadata: agents.metadata,
+        status: agents.status,
+        createdAt: agents.createdAt,
+      })
+      .from(agents)
+      .where(eq(agents.companyId, companyId));
+  }
+
+  function normalizeAgentRow(
+    row: typeof agents.$inferSelect,
+    resolvedAliases?: Map<string, ReferenceAliases>,
+  ) {
+    const normalized = withUrlKey({
       ...row,
       permissions: normalizeAgentPermissions(row.permissions, row.role),
     });
+    if (!resolvedAliases) {
+      return normalized;
+    }
+    return applyResolvedReferenceAliases(normalized, resolvedAliases.get(normalized.id));
   }
 
   async function getById(id: string) {
@@ -202,7 +240,12 @@ export function agentService(db: Db) {
       .from(agents)
       .where(eq(agents.id, id))
       .then((rows) => rows[0] ?? null);
-    return row ? normalizeAgentRow(row) : null;
+    if (!row) return null;
+    const referenceRows = await listReferenceRows(row.companyId);
+    const resolvedAliases = resolveEntityReferenceAliases("agent", referenceRows, {
+      shouldReserve: (entry) => entry.status !== "terminated",
+    });
+    return normalizeAgentRow(row, resolvedAliases);
   }
 
   async function ensureManager(companyId: string, managerId: string) {
@@ -291,6 +334,54 @@ export function agentService(db: Db) {
       const role = (data.role ?? existing.role) as string;
       normalizedPatch.permissions = normalizeAgentPermissions(data.permissions, role);
     }
+    if (data.metadata !== undefined && data.name === undefined) {
+      const existingAliases = readReferenceAliases(existing.metadata);
+      if (existingAliases) {
+        normalizedPatch.metadata = applyResolvedReferenceAliases(
+          {
+            id,
+            name: existing.name,
+            metadata: (data.metadata as Record<string, unknown> | null | undefined) ?? null,
+          },
+          existingAliases,
+        ).metadata;
+      }
+    }
+    if (data.name !== undefined) {
+      const referenceRows = await listReferenceRows(existing.companyId);
+      const candidateId = existing.id;
+      const candidateMetadataBase =
+        data.metadata !== undefined
+          ? ((data.metadata as Record<string, unknown> | null | undefined) ?? null)
+          : stripResolvedReferenceAliases(existing.metadata);
+      const resolvedAliases = resolveEntityReferenceAliases(
+        "agent",
+        referenceRows.map((row) =>
+          row.id === id
+            ? {
+                ...row,
+                name: data.name ?? row.name,
+                metadata: stripResolvedReferenceAliases(candidateMetadataBase),
+                status: typeof data.status === "string" ? data.status : row.status,
+              }
+            : row,
+        ),
+        {
+          shouldReserve: (entry) => entry.status !== "terminated",
+        },
+      );
+      const aliasMetadata = resolvedAliases.get(candidateId);
+      if (aliasMetadata) {
+        normalizedPatch.metadata = applyResolvedReferenceAliases(
+          {
+            id: candidateId,
+            name: data.name,
+            metadata: candidateMetadataBase,
+          },
+          aliasMetadata,
+        ).metadata;
+      }
+    }
 
     const shouldRecordRevision = Boolean(options?.recordRevision) && hasConfigPatchFields(normalizedPatch);
     const beforeConfig = shouldRecordRevision ? buildConfigSnapshot(existing) : null;
@@ -331,7 +422,11 @@ export function agentService(db: Db) {
         conditions.push(ne(agents.status, "terminated"));
       }
       const rows = await db.select().from(agents).where(and(...conditions));
-      return rows.map(normalizeAgentRow);
+      const referenceRows = await listReferenceRows(companyId);
+      const resolvedAliases = resolveEntityReferenceAliases("agent", referenceRows, {
+        shouldReserve: (entry) => entry.status !== "terminated",
+      });
+      return rows.map((row) => normalizeAgentRow(row, resolvedAliases));
     },
 
     getById,
@@ -343,11 +438,45 @@ export function agentService(db: Db) {
 
       await assertCompanyShortnameAvailable(companyId, data.name);
 
+      const referenceRows = await listReferenceRows(companyId);
+      const candidateId = "__candidate__";
+      const resolvedAliases = resolveEntityReferenceAliases(
+        "agent",
+        [
+          ...referenceRows,
+          {
+            id: candidateId,
+            name: data.name,
+            metadata: stripResolvedReferenceAliases((data.metadata as Record<string, unknown> | null | undefined) ?? null),
+            status: typeof data.status === "string" ? data.status : "idle",
+            createdAt: new Date(),
+          },
+        ],
+        {
+          shouldReserve: (entry) => entry.status !== "terminated",
+        },
+      );
+      const aliasMetadata = resolvedAliases.get(candidateId);
       const role = data.role ?? "general";
       const normalizedPermissions = normalizeAgentPermissions(data.permissions, role);
       const created = await db
         .insert(agents)
-        .values({ ...data, companyId, role, permissions: normalizedPermissions })
+        .values({
+          ...data,
+          metadata: aliasMetadata
+            ? applyResolvedReferenceAliases(
+                {
+                  id: candidateId,
+                  name: data.name,
+                  metadata: (data.metadata as Record<string, unknown> | null | undefined) ?? null,
+                },
+                aliasMetadata,
+              ).metadata
+            : ((data.metadata as Record<string, unknown> | null | undefined) ?? null),
+          companyId,
+          role,
+          permissions: normalizedPermissions,
+        })
         .returning()
         .then((rows) => rows[0]);
 
@@ -553,7 +682,7 @@ export function agentService(db: Db) {
         .select()
         .from(agents)
         .where(and(eq(agents.companyId, companyId), ne(agents.status, "terminated")));
-      const normalizedRows = rows.map(normalizeAgentRow);
+      const normalizedRows = rows.map((row) => normalizeAgentRow(row));
       const byManager = new Map<string | null, typeof normalizedRows>();
       for (const row of normalizedRows) {
         const key = row.reportsTo ?? null;
@@ -615,7 +744,7 @@ export function agentService(db: Db) {
 
       const rows = await db.select().from(agents).where(eq(agents.companyId, companyId));
       const matches = rows
-        .map(normalizeAgentRow)
+        .map((row) => normalizeAgentRow(row))
         .filter((agent) => agent.urlKey === urlKey && agent.status !== "terminated");
       if (matches.length === 1) {
         return { agent: matches[0] ?? null, ambiguous: false } as const;

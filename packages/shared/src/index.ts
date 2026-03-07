@@ -96,6 +96,9 @@ export type {
   DashboardSummary,
   ActivityEvent,
   SidebarBadges,
+  InstanceRuntimeSecretSource,
+  InstanceRuntimeSecretStatus,
+  InstanceRuntimeSettings,
   CompanyMembership,
   PrincipalPermissionGrant,
   Invite,
@@ -197,6 +200,7 @@ export {
   updateBudgetSchema,
   createAssetImageMetadataSchema,
   createCompanyInviteSchema,
+  updateInstanceRuntimeSettingsSchema,
   acceptInviteSchema,
   listJoinRequestsQuerySchema,
   claimJoinRequestApiKeySchema,
@@ -205,6 +209,7 @@ export {
   type CreateCostEvent,
   type UpdateBudget,
   type CreateAssetImageMetadata,
+  type UpdateInstanceRuntimeSettings,
   type CreateCompanyInvite,
   type AcceptInvite,
   type ListJoinRequestsQuery,
@@ -231,6 +236,16 @@ export {
 export { API_PREFIX, API } from "./api.js";
 export { normalizeAgentUrlKey, deriveAgentUrlKey, isUuidLike } from "./agent-url-key.js";
 export { deriveProjectUrlKey, normalizeProjectUrlKey } from "./project-url-key.js";
+export {
+  normalizeReferenceAlias,
+  readReferenceAliases,
+  mergeReferenceAliasesMetadata,
+  removeReferenceAliasesMetadata,
+  buildReferenceAliasCandidates,
+  generateUniqueReferenceAliases,
+  type ReferenceEntityKind,
+  type ReferenceAliases,
+} from "./reference-aliases.js";
 export {
   PROJECT_MENTION_SCHEME,
   buildProjectMentionHref,

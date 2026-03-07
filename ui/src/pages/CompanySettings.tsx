@@ -1,9 +1,14 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type {
+  InstanceRuntimeSecretStatus,
+  UpdateInstanceRuntimeSettings
+} from "@paperclipai/shared";
 import { useCompany } from "../context/CompanyContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { companiesApi } from "../api/companies";
 import { accessApi } from "../api/access";
+import { instanceApi } from "../api/instance";
 import { queryKeys } from "../lib/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Settings, Check } from "lucide-react";
@@ -47,6 +52,9 @@ export function CompanySettings() {
   const [inviteSnippet, setInviteSnippet] = useState<string | null>(null);
   const [snippetCopied, setSnippetCopied] = useState(false);
   const [snippetCopyDelightId, setSnippetCopyDelightId] = useState(0);
+  const [slackBotToken, setSlackBotToken] = useState("");
+  const [slackAppToken, setSlackAppToken] = useState("");
+  const [betterAuthSecret, setBetterAuthSecret] = useState("");
 
   const generalDirty =
     !!selectedCompany &&
@@ -130,6 +138,23 @@ export function CompanySettings() {
     }
   });
 
+  const instanceSettingsQuery = useQuery({
+    queryKey: queryKeys.instance.runtimeSettings,
+    queryFn: () => instanceApi.getRuntimeSettings(),
+    retry: false
+  });
+
+  const runtimeMutation = useMutation({
+    mutationFn: (data: UpdateInstanceRuntimeSettings) =>
+      instanceApi.updateRuntimeSettings(data),
+    onSuccess: (settings) => {
+      queryClient.setQueryData(queryKeys.instance.runtimeSettings, settings);
+      setSlackBotToken("");
+      setSlackAppToken("");
+      setBetterAuthSecret("");
+    }
+  });
+
   useEffect(() => {
     setInviteError(null);
     setInviteSnippet(null);
@@ -178,6 +203,25 @@ export function CompanySettings() {
       description: description.trim() || null,
       brandColor: brandColor || null
     });
+  }
+
+  const runtimeDirty =
+    slackBotToken.trim().length > 0 ||
+    slackAppToken.trim().length > 0 ||
+    betterAuthSecret.trim().length > 0;
+
+  function handleSaveRuntimeSecrets() {
+    const data: UpdateInstanceRuntimeSettings = {};
+    if (slackBotToken.trim()) {
+      data.slackBotToken = slackBotToken.trim();
+    }
+    if (slackAppToken.trim()) {
+      data.slackAppToken = slackAppToken.trim();
+    }
+    if (betterAuthSecret.trim()) {
+      data.betterAuthSecret = betterAuthSecret.trim();
+    }
+    runtimeMutation.mutate(data);
   }
 
   return (
@@ -293,6 +337,140 @@ export function CompanySettings() {
           )}
         </div>
       )}
+
+      {/* Instance Runtime */}
+      <div className="space-y-4">
+        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          Instance Runtime
+        </div>
+        <div className="space-y-3 rounded-md border border-border px-4 py-4">
+          <div className="space-y-1">
+            <div className="text-sm font-medium">Slack and auth secrets</div>
+            <p className="text-xs text-muted-foreground">
+              These values are saved to the Paperclip instance env file and
+              apply to the whole Paperclip runtime.
+            </p>
+            {instanceSettingsQuery.data?.envFilePath && (
+              <p className="text-xs text-muted-foreground">
+                Env file:{" "}
+                <span className="font-mono">
+                  {instanceSettingsQuery.data.envFilePath}
+                </span>
+              </p>
+            )}
+          </div>
+
+          {instanceSettingsQuery.isLoading && (
+            <p className="text-sm text-muted-foreground">
+              Loading instance runtime settings...
+            </p>
+          )}
+          {instanceSettingsQuery.isError && (
+            <p className="text-sm text-destructive">
+              {instanceSettingsQuery.error instanceof Error
+                ? instanceSettingsQuery.error.message
+                : "Failed to load instance runtime settings"}
+            </p>
+          )}
+
+          {instanceSettingsQuery.data && (
+            <>
+              <Field
+                label="SLACK_BOT_TOKEN"
+                hint="Socket mode requires the bot token. Saving here writes it to the Paperclip instance env file."
+              >
+                <input
+                  className="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm font-mono outline-none"
+                  type="password"
+                  value={slackBotToken}
+                  placeholder={
+                    instanceSettingsQuery.data.secrets.slackBotToken
+                      .maskedValue ?? "Not configured"
+                  }
+                  onChange={(e) => setSlackBotToken(e.target.value)}
+                />
+              </Field>
+              <p className="text-xs text-muted-foreground">
+                {describeRuntimeSecret(
+                  instanceSettingsQuery.data.secrets.slackBotToken
+                )}
+              </p>
+
+              <Field
+                label="SLACK_APP_TOKEN"
+                hint="Socket mode requires the app-level token. Saving here writes it to the Paperclip instance env file."
+              >
+                <input
+                  className="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm font-mono outline-none"
+                  type="password"
+                  value={slackAppToken}
+                  placeholder={
+                    instanceSettingsQuery.data.secrets.slackAppToken
+                      .maskedValue ?? "Not configured"
+                  }
+                  onChange={(e) => setSlackAppToken(e.target.value)}
+                />
+              </Field>
+              <p className="text-xs text-muted-foreground">
+                {describeRuntimeSecret(
+                  instanceSettingsQuery.data.secrets.slackAppToken
+                )}
+              </p>
+
+              <Field
+                label="BETTER_AUTH_SECRET"
+                hint="Required for authenticated mode. Changing it invalidates current auth sessions after restart."
+              >
+                <input
+                  className="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm font-mono outline-none"
+                  type="password"
+                  value={betterAuthSecret}
+                  placeholder={
+                    instanceSettingsQuery.data.secrets.betterAuthSecret
+                      .maskedValue ?? "Not configured"
+                  }
+                  onChange={(e) => setBetterAuthSecret(e.target.value)}
+                />
+              </Field>
+              <p className="text-xs text-muted-foreground">
+                {describeRuntimeSecret(
+                  instanceSettingsQuery.data.secrets.betterAuthSecret
+                )}
+              </p>
+
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-muted-foreground">
+                Restart Paperclip after saving these values. The server auth
+                secret and integrated Slack bot credentials are loaded at
+                startup.
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={handleSaveRuntimeSecrets}
+                  disabled={runtimeMutation.isPending || !runtimeDirty}
+                >
+                  {runtimeMutation.isPending
+                    ? "Saving..."
+                    : "Save runtime secrets"}
+                </Button>
+                {runtimeMutation.isSuccess && (
+                  <span className="text-xs text-muted-foreground">
+                    Saved to the instance env file
+                  </span>
+                )}
+                {runtimeMutation.isError && (
+                  <span className="text-xs text-destructive">
+                    {runtimeMutation.error instanceof Error
+                      ? runtimeMutation.error.message
+                      : "Failed to save runtime secrets"}
+                  </span>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
 
       {/* Hiring */}
       <div className="space-y-4">
@@ -435,6 +613,22 @@ export function CompanySettings() {
       </div>
     </div>
   );
+}
+
+function describeRuntimeSecret(secret: InstanceRuntimeSecretStatus) {
+  if (!secret.configured) {
+    return `${secret.envKey} is not configured yet.`;
+  }
+
+  if (secret.source === "paperclip_env") {
+    return `${secret.envKey} is currently sourced from the Paperclip instance env file (${secret.maskedValue}).`;
+  }
+
+  if (secret.source === "process_env") {
+    return `${secret.envKey} is currently only present in the process environment (${secret.maskedValue}). Saving here will move it into the Paperclip instance env file.`;
+  }
+
+  return `${secret.envKey} is configured (${secret.maskedValue}).`;
 }
 
 function buildAgentSnippet(input: AgentSnippetInput) {

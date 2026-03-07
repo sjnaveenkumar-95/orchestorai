@@ -39,6 +39,11 @@ export class PaperclipClient {
       expiresAt: 0,
       value: [],
     };
+    this.issueCache = {
+      expiresAt: 0,
+      key: "",
+      value: [],
+    };
   }
 
   buildUrl(pathname) {
@@ -108,6 +113,41 @@ export class PaperclipClient {
     return this.projectCache.value;
   }
 
+  buildIssueQuery(options = {}) {
+    const params = new URLSearchParams();
+    for (const key of ["status", "assigneeAgentId", "projectId", "q"]) {
+      const value = String(options[key] || "").trim();
+      if (value) {
+        params.set(key, value);
+      }
+    }
+    const query = params.toString();
+    return query ? `?${query}` : "";
+  }
+
+  invalidateIssueCache() {
+    this.issueCache = {
+      expiresAt: 0,
+      key: "",
+      value: [],
+    };
+  }
+
+  async listIssues(options = {}) {
+    const force = Boolean(options.force);
+    const query = this.buildIssueQuery(options);
+    if (!force && this.issueCache.expiresAt > Date.now() && this.issueCache.key === query) {
+      return this.issueCache.value;
+    }
+    const issues = await this.requestJson("GET", `/api/companies/${this.companyId}/issues${query}`);
+    this.issueCache = {
+      expiresAt: Date.now() + 15 * 1000,
+      key: query,
+      value: Array.isArray(issues) ? issues : [],
+    };
+    return this.issueCache.value;
+  }
+
   async getIssue(issueId) {
     if (!issueId) {
       throw new Error("issueId is required");
@@ -115,14 +155,26 @@ export class PaperclipClient {
     return await this.requestJson("GET", `/api/issues/${issueId}`);
   }
 
+  async listIssueComments(issueId) {
+    if (!issueId) {
+      throw new Error("issueId is required");
+    }
+    const comments = await this.requestJson("GET", `/api/issues/${issueId}/comments`);
+    return Array.isArray(comments) ? comments : [];
+  }
+
   async createIssue(body) {
-    return await this.requestJson("POST", `/api/companies/${this.companyId}/issues`, body);
+    const issue = await this.requestJson("POST", `/api/companies/${this.companyId}/issues`, body);
+    this.invalidateIssueCache();
+    return issue;
   }
 
   async addIssueComment(issueId, body) {
-    return await this.requestJson("POST", `/api/issues/${issueId}/comments`, {
+    const comment = await this.requestJson("POST", `/api/issues/${issueId}/comments`, {
       body,
     });
+    this.invalidateIssueCache();
+    return comment;
   }
 
   async getRunIssues(runId) {

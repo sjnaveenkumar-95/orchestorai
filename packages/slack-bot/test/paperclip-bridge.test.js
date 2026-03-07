@@ -5,7 +5,10 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  detectPaperclipCommentRequest,
+  detectPaperclipSummaryRequest,
   detectTaskRequest,
+  extractIssueIdentifiers,
   extractProjectSelectors,
   fingerprintIssueComment,
   formatChildIssueParentNotice,
@@ -38,6 +41,74 @@ test("detectTaskRequest accepts configured trigger mention before task prefix", 
   assert.ok(task);
   assert.equal(task.title, "Fix the failing deploy");
   assert.equal(task.body, "Fix the failing deploy\nMore detail here");
+});
+
+test("extractIssueIdentifiers reads Paperclip issue identifiers from text", () => {
+  const identifiers = extractIssueIdentifiers("Can you summarize AND-9 and pap-14?");
+
+  assert.deepEqual(identifiers, ["AND-9", "PAP-14"]);
+});
+
+test("detectPaperclipSummaryRequest matches overview requests", () => {
+  const request = detectPaperclipSummaryRequest({
+    text: "Can you give me a summary of tickets in Paperclip?",
+  });
+
+  assert.deepEqual(request, {
+    kind: "overview",
+    issueIdentifiers: [],
+    source: "overview",
+  });
+});
+
+test("detectPaperclipSummaryRequest matches explicit issue summaries", () => {
+  const request = detectPaperclipSummaryRequest({
+    text: "Please summarize AND-9 for me",
+  });
+
+  assert.deepEqual(request, {
+    kind: "issue",
+    issueIdentifiers: ["AND-9"],
+    source: "identifier",
+  });
+});
+
+test("detectPaperclipSummaryRequest uses mapped thread issue for 'this ticket'", () => {
+  const request = detectPaperclipSummaryRequest({
+    text: "What is the status of this ticket?",
+    mappedIssueIdentifier: "and-8",
+  });
+
+  assert.deepEqual(request, {
+    kind: "issue",
+    issueIdentifiers: ["AND-8"],
+    source: "mapped_thread",
+  });
+});
+
+test("detectPaperclipCommentRequest matches latest comment lookup by identifier", () => {
+  const request = detectPaperclipCommentRequest({
+    text: "Get me the recent comment from AND-12 ticket",
+  });
+
+  assert.deepEqual(request, {
+    kind: "latest_comment",
+    issueIdentifiers: ["AND-12"],
+    source: "identifier",
+  });
+});
+
+test("detectPaperclipCommentRequest uses mapped thread issue for current ticket comments", () => {
+  const request = detectPaperclipCommentRequest({
+    text: "What is the latest comment on this ticket?",
+    mappedIssueIdentifier: "and-9",
+  });
+
+  assert.deepEqual(request, {
+    kind: "latest_comment",
+    issueIdentifiers: ["AND-9"],
+    source: "mapped_thread",
+  });
 });
 
 test("detectTaskRequest accepts a title line before the trigger line", () => {
@@ -114,6 +185,45 @@ test("resolveAssignee falls back to exact Paperclip agent name", () => {
   assert.equal(result.source, "agent_name");
 });
 
+test("resolveAssignee uses persisted generated agent aliases before exact names", () => {
+  const result = resolveAssignee({
+    text: "task: @qa please verify the regression",
+    agentMappings: {},
+    agents: [
+      {
+        id: "agent-1",
+        name: "QA Engineer",
+        urlKey: "qa-engineer",
+        metadata: {
+          references: {
+            aliasMode: "generated",
+            primaryAlias: "qa",
+            aliases: ["qa", "qa-engineer"],
+          },
+        },
+      },
+    ],
+  });
+
+  assert.equal(result.kind, "match");
+  assert.equal(result.agent.id, "agent-1");
+  assert.equal(result.source, "agent_alias");
+});
+
+test("resolveAssignee falls back to agent urlKey when alias metadata is unavailable", () => {
+  const result = resolveAssignee({
+    text: "task: @nick-sde-3 take this",
+    agentMappings: {},
+    agents: [
+      { id: "agent-1", name: "Nick (SDE-3)", urlKey: "nick-sde-3", metadata: null },
+    ],
+  });
+
+  assert.equal(result.kind, "match");
+  assert.equal(result.agent.id, "agent-1");
+  assert.equal(result.source, "agent_url_key");
+});
+
 test("extractProjectSelectors reads project metadata lines", () => {
   const selectors = extractProjectSelectors(
     "task: Fix onboarding\nproject: Eyalty App\n#project expense-tracker",
@@ -161,6 +271,50 @@ test("resolveProject falls back to exact Paperclip project name", () => {
   assert.equal(result.kind, "match");
   assert.equal(result.project.id, "project-1");
   assert.equal(result.source, "project_name");
+});
+
+test("resolveProject uses persisted generated project aliases before exact names", () => {
+  const result = resolveProject({
+    text: "task: Fix onboarding\nproject: eyalty",
+    projectMappings: {},
+    projects: [
+      {
+        id: "project-1",
+        name: "Eyalty App",
+        urlKey: "eyalty-app",
+        metadata: {
+          references: {
+            aliasMode: "generated",
+            primaryAlias: "eyalty",
+            aliases: ["eyalty", "eyalty-app"],
+          },
+        },
+      },
+    ],
+  });
+
+  assert.equal(result.kind, "match");
+  assert.equal(result.project.id, "project-1");
+  assert.equal(result.source, "project_alias");
+});
+
+test("resolveProject falls back to project urlKey when alias metadata is unavailable", () => {
+  const result = resolveProject({
+    text: "task: Fix onboarding\nproject: expense-tracker",
+    projectMappings: {},
+    projects: [
+      {
+        id: "project-1",
+        name: "AI Auto Expense Tracker",
+        urlKey: "expense-tracker",
+        metadata: null,
+      },
+    ],
+  });
+
+  assert.equal(result.kind, "match");
+  assert.equal(result.project.id, "project-1");
+  assert.equal(result.source, "project_url_key");
 });
 
 test("stripBotMention only removes the bot mention", () => {
@@ -228,6 +382,40 @@ test("paperclip thread store persists mappings and fingerprints", () => {
     assert.equal(store.getMapping("C123", "111.222")?.issueIdentifier, "PAP-1");
     assert.equal(store.getMappingByIssueId("issue-1")?.channelId, "C123");
     assert.equal(store.hasRecentSlackFingerprint("issue-1", fingerprint), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("paperclip thread store remembers preferred company channels and can infer from mappings", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-thread-store-pref-"));
+  try {
+    const store = new PaperclipThreadStore(tmpDir);
+    store.ensureLoaded();
+
+    store.putMapping({
+      channelId: "D-OLDER",
+      threadTs: "1000.1",
+      companyId: "company-1",
+      issueId: "issue-1",
+      issueIdentifier: "AND-1",
+      createdAt: "2026-03-07T10:00:00.000Z",
+      updatedAt: "2026-03-07T10:00:00.000Z",
+    });
+    store.putMapping({
+      channelId: "D-NEWER",
+      threadTs: "1000.2",
+      companyId: "company-1",
+      issueId: "issue-2",
+      issueIdentifier: "AND-2",
+      createdAt: "2026-03-07T11:00:00.000Z",
+      updatedAt: "2026-03-07T11:00:00.000Z",
+    });
+
+    assert.equal(store.getPreferredChannel("company-1"), "D-NEWER");
+
+    store.setPreferredChannel("company-1", "D-PREFERRED");
+    assert.equal(store.getPreferredChannel("company-1"), "D-PREFERRED");
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
