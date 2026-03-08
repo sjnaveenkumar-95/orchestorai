@@ -139,7 +139,7 @@ async function main() {
     mode === "production"
       ? {
           command: process.execPath,
-          args: ["--import", "./server/node_modules/tsx/dist/loader.mjs", "server/dist/index.js"],
+          args: ["cli/node_modules/tsx/dist/cli.mjs", "cli/src/index.ts", "run", "--yes"],
         }
       : {
           command: pnpmBin,

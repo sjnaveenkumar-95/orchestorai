@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "bash scripts/start-local-docker-stack.sh",
+    "stop": "bash scripts/stop-local-docker-stack.sh",
+    "watch-logs": "docker compose -p paperclip-stack -f docker-compose.slack.yml -f docker-compose.local.yml logs -f paperclip",
     "dev": "node scripts/dev-runner.mjs watch",
     "dev:watch": "PAPERCLIP_MIGRATION_PROMPT=never node scripts/dev-runner.mjs watch",
     "dev:once": "node scripts/dev-runner.mjs dev",
@@ -29,7 +32,9 @@
     "smoke:openclaw-sse-standalone": "./scripts/smoke/openclaw-sse-standalone.sh",
     "dev:slack-bot": "pnpm --filter @paperclipai/slack-bot start",
     "dev:stack": "node scripts/run-stack.mjs",
-    "start:stack": "node scripts/run-stack.mjs production"
+    "start:stack": "node scripts/run-stack.mjs production",
+    "docker:local:up": "bash scripts/start-local-docker-stack.sh",
+    "docker:local:down": "bash scripts/stop-local-docker-stack.sh"
   },
   "devDependencies": {
     "@changesets/cli": "^2.30.0",

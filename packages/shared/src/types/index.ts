@@ -46,6 +46,11 @@ export type { DashboardSummary } from "./dashboard.js";
 export type { ActivityEvent } from "./activity.js";
 export type { SidebarBadges } from "./sidebar-badges.js";
 export type {
+  InstanceRuntimeSecretSource,
+  InstanceRuntimeSecretStatus,
+  InstanceRuntimeSettings,
+} from "./instance-settings.js";
+export type {
   CompanyMembership,
   PrincipalPermissionGrant,
   Invite,

@@ -39,6 +39,13 @@ function normalizeProjectName(value) {
   return collapseWhitespace(value).toLowerCase();
 }
 
+function asRecord(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value;
+}
+
 function slugifyLookupValue(value) {
   return collapseWhitespace(value)
     .toLowerCase()
@@ -113,6 +120,116 @@ export function extractProjectSelectors(text) {
   return uniqueStrings(selectors.map((value) => cleanSelector(value)).filter(Boolean));
 }
 
+export function extractIssueIdentifiers(text) {
+  const identifiers = [];
+  const source = String(text || "");
+  const pattern = /\b([A-Z][A-Z0-9]{1,9}-\d+)\b/gi;
+  for (const match of source.matchAll(pattern)) {
+    const identifier = String(match[1] || "").trim().toUpperCase();
+    if (identifier) {
+      identifiers.push(identifier);
+    }
+  }
+  return uniqueStrings(identifiers);
+}
+
+function looksLikeSummaryVerb(text) {
+  const source = String(text || "");
+  return (
+    /\b(summary|summari[sz]e|summarise|recap|overview|brief|details?|status|updates?|list|show|count)\b/i.test(
+      source,
+    ) ||
+    /\bwhat(?:'s| is)\s+(?:the\s+)?(?:status|update|summary)\b/i.test(source) ||
+    /\bhow many\s+(?:tickets|issues)\b/i.test(source)
+  );
+}
+
+export function detectPaperclipSummaryRequest({ text, mappedIssueIdentifier = "" }) {
+  const source = collapseWhitespace(stripSlackMentions(String(text || "")));
+  if (!source) {
+    return null;
+  }
+
+  const normalized = source.toLowerCase();
+  const identifiers = extractIssueIdentifiers(source);
+  const summaryIntent = looksLikeSummaryVerb(normalized) || /\babout\b/i.test(normalized);
+  if (!summaryIntent) {
+    return null;
+  }
+
+  if (identifiers.length > 0) {
+    return {
+      kind: "issue",
+      issueIdentifiers: identifiers,
+      source: "identifier",
+    };
+  }
+
+  const refersToCurrentIssue =
+    /\b(this|that|current)\s+(ticket|issue|thread)\b/i.test(normalized) ||
+    /\b(ticket|issue)\s+details\b/i.test(normalized);
+  if (mappedIssueIdentifier && refersToCurrentIssue) {
+    return {
+      kind: "issue",
+      issueIdentifiers: [String(mappedIssueIdentifier).trim().toUpperCase()],
+      source: "mapped_thread",
+    };
+  }
+
+  const overviewIntent =
+    /\b(tickets|issues|dashboard|board)\b/i.test(normalized) || /\bpaperclip\b/i.test(normalized);
+  if (!overviewIntent) {
+    return null;
+  }
+
+  return {
+    kind: "overview",
+    issueIdentifiers: [],
+    source: "overview",
+  };
+}
+
+export function detectPaperclipCommentRequest({ text, mappedIssueIdentifier = "" }) {
+  const source = collapseWhitespace(stripSlackMentions(String(text || "")));
+  if (!source) {
+    return null;
+  }
+
+  const normalized = source.toLowerCase();
+  const mentionsComment = /\bcomments?\b/i.test(normalized);
+  const wantsLatest =
+    /\b(latest|recent|last|newest|most recent)\b/i.test(normalized) ||
+    /\bshow\b/i.test(normalized) ||
+    /\bget\b/i.test(normalized) ||
+    /\bwhat(?:'s| is)\b/i.test(normalized);
+
+  if (!mentionsComment || !wantsLatest) {
+    return null;
+  }
+
+  const identifiers = extractIssueIdentifiers(source);
+  if (identifiers.length > 0) {
+    return {
+      kind: "latest_comment",
+      issueIdentifiers: identifiers,
+      source: "identifier",
+    };
+  }
+
+  const refersToCurrentIssue =
+    /\b(this|that|current)\s+(ticket|issue|thread)\b/i.test(normalized) ||
+    /\b(ticket|issue)\s+comments?\b/i.test(normalized);
+  if (mappedIssueIdentifier && refersToCurrentIssue) {
+    return {
+      kind: "latest_comment",
+      issueIdentifiers: [String(mappedIssueIdentifier).trim().toUpperCase()],
+      source: "mapped_thread",
+    };
+  }
+
+  return null;
+}
+
 function mappingLookupCandidates({ slackMentionIds, plainMentions }) {
   const keys = [];
   for (const id of slackMentionIds || []) {
@@ -168,6 +285,22 @@ function findAgentById(agents, agentId) {
 
 function findProjectById(projects, projectId) {
   return (projects || []).find((project) => String(project?.id || "") === String(projectId || "")) || null;
+}
+
+function readEntityReferenceAliases(entity) {
+  const references = asRecord(asRecord(entity?.metadata)?.references);
+  if (!references) {
+    return [];
+  }
+  const primaryAlias = slugifyLookupValue(references.primaryAlias);
+  const aliases = Array.isArray(references.aliases)
+    ? references.aliases.map((entry) => slugifyLookupValue(entry))
+    : [];
+  return uniqueStrings([primaryAlias, ...aliases].filter(Boolean));
+}
+
+export function getPrimaryReferenceAlias(entity) {
+  return readEntityReferenceAliases(entity)[0] || "";
 }
 
 export function detectTaskRequest({ text, taskPrefix }) {
@@ -303,6 +436,63 @@ export function resolveAssignee({ text, agentMappings, agents }) {
     };
   }
 
+  const aliasMatches = new Map();
+  const normalizedMentions = plainMentions.map((entry) => slugifyLookupValue(entry)).filter(Boolean);
+  for (const mentionAlias of normalizedMentions) {
+    const matched = (agents || []).filter((agent) => readEntityReferenceAliases(agent).includes(mentionAlias));
+    for (const agent of matched) {
+      aliasMatches.set(agent.id, {
+        agent,
+        matchedBy: mentionAlias,
+        source: "agent_alias",
+      });
+    }
+  }
+
+  if (aliasMatches.size > 1) {
+    return {
+      kind: "ambiguous",
+      reason: "multiple_alias_agents",
+      candidates: Array.from(aliasMatches.values()).map((entry) => entry.agent),
+    };
+  }
+  if (aliasMatches.size === 1) {
+    const match = Array.from(aliasMatches.values())[0];
+    return {
+      kind: "match",
+      agent: match.agent,
+      matchedBy: match.matchedBy,
+      source: match.source,
+    };
+  }
+
+  const urlKeyMatches = new Map();
+  for (const mentionAlias of normalizedMentions) {
+    const matched = (agents || []).filter(
+      (agent) => slugifyLookupValue(agent?.urlKey || "") === mentionAlias,
+    );
+    for (const agent of matched) {
+      urlKeyMatches.set(agent.id, agent);
+    }
+  }
+
+  if (urlKeyMatches.size > 1) {
+    return {
+      kind: "ambiguous",
+      reason: "multiple_url_key_agents",
+      candidates: Array.from(urlKeyMatches.values()),
+    };
+  }
+  if (urlKeyMatches.size === 1) {
+    const agent = Array.from(urlKeyMatches.values())[0];
+    return {
+      kind: "match",
+      agent,
+      matchedBy: agent.urlKey || agent.name,
+      source: "agent_url_key",
+    };
+  }
+
   const exactNameMatches = new Map();
   const names = plainMentions.map((entry) => normalizeAgentName(entry));
   for (const mentionName of names) {
@@ -383,6 +573,76 @@ export function resolveProject({ text, projectMappings, projects }) {
       project: match.project,
       matchedBy: match.matchedBy,
       source: match.source,
+      selectors,
+    };
+  }
+
+  const aliasMatches = new Map();
+  for (const selector of selectors) {
+    const selectorAlias = slugifyLookupValue(selector);
+    if (!selectorAlias) {
+      continue;
+    }
+    const matched = (projects || []).filter((project) =>
+      readEntityReferenceAliases(project).includes(selectorAlias),
+    );
+    for (const project of matched) {
+      aliasMatches.set(project.id, {
+        project,
+        matchedBy: selectorAlias,
+        source: "project_alias",
+      });
+    }
+  }
+
+  if (aliasMatches.size > 1) {
+    return {
+      kind: "ambiguous",
+      reason: "multiple_alias_projects",
+      selectors,
+      candidates: Array.from(aliasMatches.values()).map((entry) => entry.project),
+    };
+  }
+  if (aliasMatches.size === 1) {
+    const match = Array.from(aliasMatches.values())[0];
+    return {
+      kind: "match",
+      project: match.project,
+      matchedBy: match.matchedBy,
+      source: match.source,
+      selectors,
+    };
+  }
+
+  const urlKeyMatches = new Map();
+  for (const selector of selectors) {
+    const selectorAlias = slugifyLookupValue(selector);
+    if (!selectorAlias) {
+      continue;
+    }
+    const matched = (projects || []).filter(
+      (project) => slugifyLookupValue(project?.urlKey || "") === selectorAlias,
+    );
+    for (const project of matched) {
+      urlKeyMatches.set(project.id, project);
+    }
+  }
+
+  if (urlKeyMatches.size > 1) {
+    return {
+      kind: "ambiguous",
+      reason: "multiple_url_key_projects",
+      selectors,
+      candidates: Array.from(urlKeyMatches.values()),
+    };
+  }
+  if (urlKeyMatches.size === 1) {
+    const project = Array.from(urlKeyMatches.values())[0];
+    return {
+      kind: "match",
+      project,
+      matchedBy: project.urlKey || project.name,
+      source: "project_url_key",
       selectors,
     };
   }

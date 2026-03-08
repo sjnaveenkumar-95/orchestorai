@@ -1,7 +1,5 @@
 import { readConfigFile } from "./config-file.js";
-import { existsSync } from "node:fs";
-import { config as loadDotenv } from "dotenv";
-import { resolvePaperclipEnvPath } from "./paths.js";
+import { loadPaperclipEnvFile } from "./paperclip-env.js";
 import {
   AUTH_BASE_URL_MODES,
   DEPLOYMENT_EXPOSURES,
@@ -22,10 +20,9 @@ import {
   resolveHomeAwarePath,
 } from "./home-paths.js";
 
-const PAPERCLIP_ENV_FILE_PATH = resolvePaperclipEnvPath();
-if (existsSync(PAPERCLIP_ENV_FILE_PATH)) {
-  loadDotenv({ path: PAPERCLIP_ENV_FILE_PATH, override: false, quiet: true });
-}
+loadPaperclipEnvFile({
+  overrideKeys: ["BETTER_AUTH_SECRET"],
+});
 
 type DatabaseMode = "embedded-postgres" | "postgres";
 

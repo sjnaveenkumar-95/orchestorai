@@ -22,12 +22,12 @@ services:
     environment:
       HOST: "0.0.0.0"
       DATABASE_URL: "postgres://paperclip:paperclip@db:5432/paperclip"
-      PAPERCLIP_HOME: "/paperclip"
+      PAPERCLIP_HOME: "${PAPERCLIP_RUNTIME_HOME:-/paperclip}"
       PAPERCLIP_SLACK_ENABLED: "${PAPERCLIP_SLACK_ENABLED:-false}"
       PAPERCLIP_DEPLOYMENT_MODE: "${PAPERCLIP_DEPLOYMENT_MODE:-authenticated}"
       PAPERCLIP_DEPLOYMENT_EXPOSURE: "${PAPERCLIP_DEPLOYMENT_EXPOSURE:-private}"
       PAPERCLIP_PUBLIC_URL: "${PAPERCLIP_PUBLIC_URL:-http://localhost:3100}"
-      BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET must be set}"
+      BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:-}"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       SLACK_MODE: "${SLACK_MODE:-socket}"
@@ -46,7 +46,7 @@ services:
       CODEX_TIMEOUT_MS: "${CODEX_TIMEOUT_MS:-1800000}"
       CODEX_SYSTEM_PROMPT: "${CODEX_SYSTEM_PROMPT:-You are Codex. Reply concisely and helpfully.}"
     volumes:
-      - "${PAPERCLIP_DATA_DIR:-./data/docker-paperclip-stack}:/paperclip"
+      - "${PAPERCLIP_DATA_DIR:-./data/docker-paperclip-stack}:${PAPERCLIP_RUNTIME_HOME:-/paperclip}"
     depends_on:
       db:
         condition: service_healthy

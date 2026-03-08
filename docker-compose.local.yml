@@ -1,0 +1,49 @@
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      PGDATA: /var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - listen_addresses=*
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+    volumes:
+      - ${PAPERCLIP_DATA_DIR}/instances/default/db:/var/lib/postgresql/data
+      - ${PAPERCLIP_DATA_DIR}/docker/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+
+  paperclip:
+    user: "${DOCKER_UID}:${DOCKER_GID}"
+    env_file:
+      - .env
+    environment:
+      HOME: "${PAPERCLIP_RUNTIME_HOME}"
+      TMPDIR: "/tmp"
+      XDG_CACHE_HOME: "${PAPERCLIP_RUNTIME_HOME}/.cache"
+      COREPACK_HOME: "${PAPERCLIP_RUNTIME_HOME}/.cache/node/corepack"
+      HOST: "127.0.0.1"
+      PORT: "3101"
+      PAPERCLIP_HOME: "${PAPERCLIP_RUNTIME_HOME}"
+      PAPERCLIP_DATA_DIR: "${PAPERCLIP_RUNTIME_HOME}"
+      PAPERCLIP_CONFIG: "${PAPERCLIP_RUNTIME_HOME}/instances/default/config.json"
+      PAPERCLIP_LOG_DIR: "${PAPERCLIP_RUNTIME_HOME}/instances/default/logs"
+      PAPERCLIP_API_URL: "http://127.0.0.1:3101"
+      CODEX_HOME: "/workspace/project/.codex"
+      CODEX_WORKDIR: "${CODEX_WORKDIR:-/workspace/project}"
+      CODEX_ADDITIONAL_WRITABLE_DIRS: "${CODEX_ADDITIONAL_WRITABLE_DIRS}"
+      DATA_DIR: "${PAPERCLIP_RUNTIME_HOME}/slack-bot/data"
+      RUN_LOG_BASE_PATH: "${PAPERCLIP_RUNTIME_HOME}/instances/default/data/run-logs"
+      PAPERCLIP_TASK_PREFIX: "${PAPERCLIP_TASK_PREFIX:-task:}"
+      PAPERCLIP_SYNC_REPLIES: "${PAPERCLIP_SYNC_REPLIES:-mention_only}"
+      PAPERCLIP_NOTIFICATION_MODE: "${PAPERCLIP_NOTIFICATION_MODE:-high_signal}"
+    command:
+      - sh
+      - -lc
+      - |
+        node -e "const net=require('node:net'); net.createServer((client)=>{const upstream=net.connect(3101,'127.0.0.1'); client.pipe(upstream); upstream.pipe(client); const close=()=>{client.destroy(); upstream.destroy();}; client.on('error', close); upstream.on('error', close);}).listen(3100,'0.0.0.0');" &
+        exec node scripts/run-stack.mjs production
+    volumes:
+      - ./:/workspace/project
+      - ./packages/slack-bot/src:/app/packages/slack-bot/src
+      - ${PAPERCLIP_HOST_WORKSPACE_ROOT}:${PAPERCLIP_HOST_WORKSPACE_ROOT}

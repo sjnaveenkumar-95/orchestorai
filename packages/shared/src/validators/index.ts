@@ -118,6 +118,11 @@ export {
 } from "./asset.js";
 
 export {
+  updateInstanceRuntimeSettingsSchema,
+  type UpdateInstanceRuntimeSettings,
+} from "./instance-settings.js";
+
+export {
   createCompanyInviteSchema,
   acceptInviteSchema,
   listJoinRequestsQuerySchema,

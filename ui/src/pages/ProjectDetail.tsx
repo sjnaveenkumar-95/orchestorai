@@ -16,7 +16,10 @@ import { InlineEditor } from "../components/InlineEditor";
 import { StatusBadge } from "../components/StatusBadge";
 import { IssuesList } from "../components/IssuesList";
 import { PageSkeleton } from "../components/PageSkeleton";
+import { CopyText } from "../components/CopyText";
 import { projectRouteRef, cn } from "../lib/utils";
+import { formatProjectReferenceAlias } from "../lib/reference-aliases";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -290,6 +293,7 @@ export function ProjectDetail() {
   if (isLoading) return <PageSkeleton variant="detail" />;
   if (error) return <p className="text-sm text-destructive">{error.message}</p>;
   if (!project) return null;
+  const slackProjectAlias = formatProjectReferenceAlias(project.metadata);
 
   const handleTabChange = (tab: ProjectTab) => {
     if (tab === "overview") {
@@ -308,12 +312,22 @@ export function ProjectDetail() {
             onSelect={(color) => updateProject.mutate({ color })}
           />
         </div>
-        <InlineEditor
-          value={project.name}
-          onSave={(name) => updateProject.mutate({ name })}
-          as="h2"
-          className="text-xl font-bold"
-        />
+        <div className="min-w-0">
+          <InlineEditor
+            value={project.name}
+            onSave={(name) => updateProject.mutate({ name })}
+            as="h2"
+            className="text-xl font-bold"
+          />
+          {slackProjectAlias ? (
+            <div className="mt-2 flex items-center gap-2">
+              <Badge variant="secondary" className="font-mono text-[11px]">
+                Slack: {slackProjectAlias}
+              </Badge>
+              <CopyText text={slackProjectAlias} />
+            </div>
+          ) : null}
+        </div>
         <Button
           variant="ghost"
           size="icon-xs"

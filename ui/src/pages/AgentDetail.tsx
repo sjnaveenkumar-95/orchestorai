@@ -26,6 +26,8 @@ import { Identity } from "../components/Identity";
 import { PageSkeleton } from "../components/PageSkeleton";
 import { formatCents, formatDate, relativeTime, formatTokens } from "../lib/utils";
 import { cn } from "../lib/utils";
+import { formatAgentReferenceAlias } from "../lib/reference-aliases";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -376,8 +378,8 @@ export function AgentDetail() {
   });
 
   const updatePermissions = useMutation({
-    mutationFn: (canCreateAgents: boolean) =>
-      agentsApi.updatePermissions(agentLookupRef, { canCreateAgents }, resolvedCompanyId ?? undefined),
+    mutationFn: (permissions: { canCreateAgents: boolean; canAssignTasks: boolean }) =>
+      agentsApi.updatePermissions(agentLookupRef, permissions, resolvedCompanyId ?? undefined),
     onSuccess: () => {
       setActionError(null);
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(routeAgentRef) });
@@ -429,6 +431,7 @@ export function AgentDetail() {
   if (error) return <p className="text-sm text-destructive">{error.message}</p>;
   if (!agent) return null;
   const isPendingApproval = agent.status === "pending_approval";
+  const slackAlias = formatAgentReferenceAlias(agent.metadata);
   const showConfigActionBar = activeView === "configure" && configDirty;
 
   return (
@@ -450,6 +453,14 @@ export function AgentDetail() {
               {roleLabels[agent.role] ?? agent.role}
               {agent.title ? ` - ${agent.title}` : ""}
             </p>
+            {slackAlias ? (
+              <div className="mt-2 flex items-center gap-2">
+                <Badge variant="secondary" className="font-mono text-[11px]">
+                  Slack: {slackAlias}
+                </Badge>
+                <CopyText text={slackAlias} />
+              </div>
+            ) : null}
           </div>
         </div>
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
@@ -1045,7 +1056,10 @@ function AgentConfigurePage({
   onSaveActionChange: (save: (() => void) | null) => void;
   onCancelActionChange: (cancel: (() => void) | null) => void;
   onSavingChange: (saving: boolean) => void;
-  updatePermissions: { mutate: (canCreate: boolean) => void; isPending: boolean };
+  updatePermissions: {
+    mutate: (permissions: { canCreateAgents: boolean; canAssignTasks: boolean }) => void;
+    isPending: boolean;
+  };
 }) {
   const queryClient = useQueryClient();
   const [revisionsOpen, setRevisionsOpen] = useState(false);
@@ -1151,7 +1165,10 @@ function ConfigurationTab({
   onSaveActionChange: (save: (() => void) | null) => void;
   onCancelActionChange: (cancel: (() => void) | null) => void;
   onSavingChange: (saving: boolean) => void;
-  updatePermissions: { mutate: (canCreate: boolean) => void; isPending: boolean };
+  updatePermissions: {
+    mutate: (permissions: { canCreateAgents: boolean; canAssignTasks: boolean }) => void;
+    isPending: boolean;
+  };
 }) {
   const queryClient = useQueryClient();
 
@@ -1202,11 +1219,31 @@ function ConfigurationTab({
               size="sm"
               className="h-7 px-2.5 text-xs"
               onClick={() =>
-                updatePermissions.mutate(!Boolean(agent.permissions?.canCreateAgents))
+                updatePermissions.mutate({
+                  canCreateAgents: !Boolean(agent.permissions?.canCreateAgents),
+                  canAssignTasks: Boolean(agent.permissions?.canAssignTasks),
+                })
               }
               disabled={updatePermissions.isPending}
             >
               {agent.permissions?.canCreateAgents ? "Enabled" : "Disabled"}
+            </Button>
+          </div>
+          <div className="mt-3 flex items-center justify-between text-sm">
+            <span>Can assign tasks</span>
+            <Button
+              variant={agent.permissions?.canAssignTasks ? "default" : "outline"}
+              size="sm"
+              className="h-7 px-2.5 text-xs"
+              onClick={() =>
+                updatePermissions.mutate({
+                  canCreateAgents: Boolean(agent.permissions?.canCreateAgents),
+                  canAssignTasks: !Boolean(agent.permissions?.canAssignTasks),
+                })
+              }
+              disabled={updatePermissions.isPending}
+            >
+              {agent.permissions?.canAssignTasks ? "Enabled" : "Disabled"}
             </Button>
           </div>
         </div>

@@ -12,6 +12,7 @@ import { sidebarBadgesApi } from "../api/sidebarBadges";
 import { useCompany } from "../context/CompanyContext";
 import { useDialog } from "../context/DialogContext";
 import { queryKeys } from "../lib/queryKeys";
+import { useInboxDismissedItems } from "../lib/inbox-dismissals";
 import { cn } from "../lib/utils";
 
 interface MobileBottomNavProps {
@@ -39,10 +40,11 @@ export function MobileBottomNav({ visible }: MobileBottomNavProps) {
   const location = useLocation();
   const { selectedCompanyId } = useCompany();
   const { openNewIssue } = useDialog();
+  const { sidebarBadgeDismissedIds, sidebarBadgeDismissedSignature } = useInboxDismissedItems();
 
   const { data: sidebarBadges } = useQuery({
-    queryKey: queryKeys.sidebarBadges(selectedCompanyId!),
-    queryFn: () => sidebarBadgesApi.get(selectedCompanyId!),
+    queryKey: queryKeys.sidebarBadges(selectedCompanyId!, sidebarBadgeDismissedSignature),
+    queryFn: () => sidebarBadgesApi.get(selectedCompanyId!, sidebarBadgeDismissedIds),
     enabled: !!selectedCompanyId,
   });
 

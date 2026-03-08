@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useDialog } from "../context/DialogContext";
 import { useCompany } from "../context/CompanyContext";
+import { useToast } from "../context/ToastContext";
 import { projectsApi } from "../api/projects";
 import { goalsApi } from "../api/goals";
 import { assetsApi } from "../api/assets";
@@ -28,7 +29,8 @@ import {
   GitBranch,
 } from "lucide-react";
 import { PROJECT_COLORS } from "@paperclipai/shared";
-import { cn } from "../lib/utils";
+import { cn, projectUrl } from "../lib/utils";
+import { formatProjectReferenceAlias } from "../lib/reference-aliases";
 import { MarkdownEditor, type MarkdownEditorRef } from "./MarkdownEditor";
 import { StatusBadge } from "./StatusBadge";
 import { ChoosePathButton } from "./PathInstructionsModal";
@@ -47,6 +49,7 @@ const REPO_ONLY_CWD_SENTINEL = "/__paperclip_repo_only__";
 export function NewProjectDialog() {
   const { newProjectOpen, closeNewProject } = useDialog();
   const { selectedCompanyId, selectedCompany } = useCompany();
+  const { pushToast } = useToast();
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -182,6 +185,19 @@ export function NewProjectDialog() {
           ...workspacePayload,
         });
       }
+
+      const slackAlias = formatProjectReferenceAlias(created.metadata ?? null);
+      pushToast({
+        title: "Project created",
+        body: slackAlias
+          ? `Slack selector: ${slackAlias}`
+          : undefined,
+        tone: "success",
+        action: {
+          label: "Open project",
+          href: projectUrl(created),
+        },
+      });
 
       queryClient.invalidateQueries({ queryKey: queryKeys.projects.list(selectedCompanyId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.projects.detail(created.id) });

@@ -6,9 +6,16 @@ import {
   deriveProjectUrlKey,
   isUuidLike,
   normalizeProjectUrlKey,
+  readReferenceAliases,
+  type ReferenceAliases,
   type ProjectGoalRef,
   type ProjectWorkspace,
 } from "@paperclipai/shared";
+import {
+  applyResolvedReferenceAliases,
+  resolveEntityReferenceAliases,
+  stripResolvedReferenceAliases,
+} from "./reference-aliases.js";
 
 type ProjectRow = typeof projects.$inferSelect;
 type ProjectWorkspaceRow = typeof projectWorkspaces.$inferSelect;
@@ -29,6 +36,13 @@ interface ProjectWithGoals extends ProjectRow {
   goals: ProjectGoalRef[];
   workspaces: ProjectWorkspace[];
   primaryWorkspace: ProjectWorkspace | null;
+}
+
+interface ProjectReferenceRow {
+  id: string;
+  name: string;
+  metadata: Record<string, unknown> | null;
+  createdAt: Date;
 }
 
 /** Batch-load goal refs for a set of projects. */
@@ -223,10 +237,33 @@ async function ensureSinglePrimaryWorkspace(
 }
 
 export function projectService(db: Db) {
+  async function listReferenceRows(companyId: string): Promise<ProjectReferenceRow[]> {
+    return db
+      .select({
+        id: projects.id,
+        name: projects.name,
+        metadata: projects.metadata,
+        createdAt: projects.createdAt,
+      })
+      .from(projects)
+      .where(eq(projects.companyId, companyId));
+  }
+
+  function applyProjectReferenceAliases<T extends ProjectRow>(
+    row: T,
+    resolvedAliases?: Map<string, ReferenceAliases>,
+  ): T {
+    if (!resolvedAliases) return row;
+    return applyResolvedReferenceAliases(row, resolvedAliases.get(row.id));
+  }
+
   return {
     list: async (companyId: string): Promise<ProjectWithGoals[]> => {
       const rows = await db.select().from(projects).where(eq(projects.companyId, companyId));
-      const withGoals = await attachGoals(db, rows);
+      const referenceRows = await listReferenceRows(companyId);
+      const resolvedAliases = resolveEntityReferenceAliases("project", referenceRows);
+      const hydratedRows = rows.map((row) => applyProjectReferenceAliases(row, resolvedAliases));
+      const withGoals = await attachGoals(db, hydratedRows);
       return attachWorkspaces(db, withGoals);
     },
 
@@ -237,7 +274,10 @@ export function projectService(db: Db) {
         .select()
         .from(projects)
         .where(and(eq(projects.companyId, companyId), inArray(projects.id, dedupedIds)));
-      const withGoals = await attachGoals(db, rows);
+      const referenceRows = await listReferenceRows(companyId);
+      const resolvedAliases = resolveEntityReferenceAliases("project", referenceRows);
+      const hydratedRows = rows.map((row) => applyProjectReferenceAliases(row, resolvedAliases));
+      const withGoals = await attachGoals(db, hydratedRows);
       const withWorkspaces = await attachWorkspaces(db, withGoals);
       const byId = new Map(withWorkspaces.map((project) => [project.id, project]));
       return dedupedIds.map((id) => byId.get(id)).filter((project): project is ProjectWithGoals => Boolean(project));
@@ -250,7 +290,9 @@ export function projectService(db: Db) {
         .where(eq(projects.id, id))
         .then((rows) => rows[0] ?? null);
       if (!row) return null;
-      const [withGoals] = await attachGoals(db, [row]);
+      const referenceRows = await listReferenceRows(row.companyId);
+      const resolvedAliases = resolveEntityReferenceAliases("project", referenceRows);
+      const [withGoals] = await attachGoals(db, [applyProjectReferenceAliases(row, resolvedAliases)]);
       if (!withGoals) return null;
       const [enriched] = await attachWorkspaces(db, [withGoals]);
       return enriched ?? null;
@@ -273,10 +315,38 @@ export function projectService(db: Db) {
 
       // Also write goalId to the legacy column (first goal or null)
       const legacyGoalId = ids && ids.length > 0 ? ids[0] : projectData.goalId ?? null;
+      const referenceRows = await listReferenceRows(companyId);
+      const candidateId = "__candidate__";
+      const resolvedAliases = resolveEntityReferenceAliases("project", [
+        ...referenceRows,
+        {
+          id: candidateId,
+          name: projectData.name,
+          metadata: stripResolvedReferenceAliases(
+            (projectData.metadata as Record<string, unknown> | null | undefined) ?? null,
+          ),
+          createdAt: new Date(),
+        },
+      ]);
+      const aliasMetadata = resolvedAliases.get(candidateId);
 
       const row = await db
         .insert(projects)
-        .values({ ...projectData, goalId: legacyGoalId, companyId })
+        .values({
+          ...projectData,
+          metadata: aliasMetadata
+            ? applyResolvedReferenceAliases(
+                {
+                  id: candidateId,
+                  name: projectData.name,
+                  metadata: (projectData.metadata as Record<string, unknown> | null | undefined) ?? null,
+                },
+                aliasMetadata,
+              ).metadata
+            : ((projectData.metadata as Record<string, unknown> | null | undefined) ?? null),
+          goalId: legacyGoalId,
+          companyId,
+        })
         .returning()
         .then((rows) => rows[0]);
 
@@ -295,6 +365,17 @@ export function projectService(db: Db) {
     ): Promise<ProjectWithGoals | null> => {
       const { goalIds: inputGoalIds, ...projectData } = data;
       const ids = resolveGoalIds({ goalIds: inputGoalIds, goalId: projectData.goalId });
+      const existingProject =
+        projectData.name !== undefined || projectData.metadata !== undefined
+          ? await db
+              .select()
+              .from(projects)
+              .where(eq(projects.id, id))
+              .then((rows) => rows[0] ?? null)
+          : null;
+      if ((projectData.name !== undefined || projectData.metadata !== undefined) && !existingProject) {
+        return null;
+      }
 
       // Keep legacy goalId column in sync
       const updates: Partial<typeof projects.$inferInsert> = {
@@ -303,6 +384,50 @@ export function projectService(db: Db) {
       };
       if (ids !== undefined) {
         updates.goalId = ids.length > 0 ? ids[0] : null;
+      }
+      if (projectData.metadata !== undefined && projectData.name === undefined) {
+        const existingAliases = readReferenceAliases(existingProject?.metadata ?? null);
+        if (existingAliases) {
+          updates.metadata = applyResolvedReferenceAliases(
+            {
+              id,
+              name: existingProject?.name ?? "project",
+              metadata: (projectData.metadata as Record<string, unknown> | null | undefined) ?? null,
+            },
+            existingAliases,
+          ).metadata;
+        }
+      }
+      if (projectData.name !== undefined) {
+        const projectRecord = existingProject!;
+        const referenceRows = await listReferenceRows(projectRecord.companyId);
+        const candidateMetadataBase =
+          projectData.metadata !== undefined
+            ? ((projectData.metadata as Record<string, unknown> | null | undefined) ?? null)
+            : stripResolvedReferenceAliases((projectRecord.metadata as Record<string, unknown> | null | undefined) ?? null);
+        const resolvedAliases = resolveEntityReferenceAliases(
+          "project",
+          referenceRows.map((row) =>
+            row.id === id
+              ? {
+                  ...row,
+                  name: projectData.name ?? row.name,
+                  metadata: stripResolvedReferenceAliases(candidateMetadataBase),
+                }
+              : row,
+          ),
+        );
+        const aliasMetadata = resolvedAliases.get(id);
+        if (aliasMetadata) {
+          updates.metadata = applyResolvedReferenceAliases(
+            {
+              id,
+              name: projectData.name,
+              metadata: candidateMetadataBase,
+            },
+            aliasMetadata,
+          ).metadata;
+        }
       }
 
       const row = await db
