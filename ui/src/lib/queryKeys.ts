@@ -65,7 +65,8 @@ export const queryKeys = {
     providers: (companyId: string) => ["secret-providers", companyId] as const,
   },
   dashboard: (companyId: string) => ["dashboard", companyId] as const,
-  sidebarBadges: (companyId: string) => ["sidebar-badges", companyId] as const,
+  sidebarBadges: (companyId: string, dismissedSignature: string = "") =>
+    ["sidebar-badges", companyId, dismissedSignature] as const,
   activity: (companyId: string) => ["activity", companyId] as const,
   costs: (companyId: string, from?: string, to?: string) =>
     ["costs", companyId, from, to] as const,

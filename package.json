@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "bash scripts/start-local-docker-stack.sh",
+    "stop": "bash scripts/stop-local-docker-stack.sh",
+    "watch-logs": "docker compose -p paperclip-stack -f docker-compose.slack.yml -f docker-compose.local.yml logs -f paperclip",
     "dev": "node scripts/dev-runner.mjs watch",
     "dev:watch": "PAPERCLIP_MIGRATION_PROMPT=never node scripts/dev-runner.mjs watch",
     "dev:once": "node scripts/dev-runner.mjs dev",

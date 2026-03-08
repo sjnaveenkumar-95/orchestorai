@@ -20,6 +20,7 @@ import { useCompany } from "../context/CompanyContext";
 import { useDialog } from "../context/DialogContext";
 import { cn } from "../lib/utils";
 import { queryKeys } from "../lib/queryKeys";
+import { useInboxDismissedItems } from "../lib/inbox-dismissals";
 import { sidebarBadgesApi } from "../api/sidebarBadges";
 import { heartbeatsApi } from "../api/heartbeats";
 import {
@@ -154,6 +155,7 @@ function SortableCompanyItem({
 export function CompanyRail() {
   const { companies, selectedCompanyId, setSelectedCompanyId } = useCompany();
   const { openOnboarding } = useDialog();
+  const { sidebarBadgeDismissedIds, sidebarBadgeDismissedSignature } = useInboxDismissedItems();
   const sidebarCompanies = useMemo(
     () => companies.filter((company) => company.status !== "archived"),
     [companies],
@@ -169,8 +171,8 @@ export function CompanyRail() {
   });
   const sidebarBadgeQueries = useQueries({
     queries: companyIds.map((companyId) => ({
-      queryKey: queryKeys.sidebarBadges(companyId),
-      queryFn: () => sidebarBadgesApi.get(companyId),
+      queryKey: queryKeys.sidebarBadges(companyId, sidebarBadgeDismissedSignature),
+      queryFn: () => sidebarBadgesApi.get(companyId, sidebarBadgeDismissedIds),
       refetchInterval: 15_000,
     })),
   });

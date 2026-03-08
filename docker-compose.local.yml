@@ -19,7 +19,7 @@ services:
       - .env
     environment:
       HOME: "${PAPERCLIP_RUNTIME_HOME}"
-      TMPDIR: "${PAPERCLIP_RUNTIME_HOME}/.tmp"
+      TMPDIR: "/tmp"
       XDG_CACHE_HOME: "${PAPERCLIP_RUNTIME_HOME}/.cache"
       COREPACK_HOME: "${PAPERCLIP_RUNTIME_HOME}/.cache/node/corepack"
       HOST: "127.0.0.1"

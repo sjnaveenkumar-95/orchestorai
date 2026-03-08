@@ -20,14 +20,16 @@ import { useCompany } from "../context/CompanyContext";
 import { sidebarBadgesApi } from "../api/sidebarBadges";
 import { heartbeatsApi } from "../api/heartbeats";
 import { queryKeys } from "../lib/queryKeys";
+import { useInboxDismissedItems } from "../lib/inbox-dismissals";
 import { Button } from "@/components/ui/button";
 
 export function Sidebar() {
   const { openNewIssue } = useDialog();
   const { selectedCompanyId, selectedCompany } = useCompany();
+  const { sidebarBadgeDismissedIds, sidebarBadgeDismissedSignature } = useInboxDismissedItems();
   const { data: sidebarBadges } = useQuery({
-    queryKey: queryKeys.sidebarBadges(selectedCompanyId!),
-    queryFn: () => sidebarBadgesApi.get(selectedCompanyId!),
+    queryKey: queryKeys.sidebarBadges(selectedCompanyId!, sidebarBadgeDismissedSignature),
+    queryFn: () => sidebarBadgesApi.get(selectedCompanyId!, sidebarBadgeDismissedIds),
     enabled: !!selectedCompanyId,
   });
   const { data: liveRuns } = useQuery({
