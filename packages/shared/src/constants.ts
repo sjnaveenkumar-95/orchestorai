@@ -26,8 +26,6 @@ export const AGENT_ADAPTER_TYPES = [
   "http",
   "claude_local",
   "codex_local",
-  "opencode_local",
-  "cursor",
   "openclaw",
 ] as const;
 export type AgentAdapterType = (typeof AGENT_ADAPTER_TYPES)[number];
@@ -120,6 +118,29 @@ export const PROJECT_STATUSES = [
   "cancelled",
 ] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
+
+export const PROJECT_SLACK_CHANNEL_VISIBILITIES = ["public", "private"] as const;
+export type ProjectSlackChannelVisibility = (typeof PROJECT_SLACK_CHANNEL_VISIBILITIES)[number];
+
+export const AGENT_SLACK_APP_INSTALL_STATUSES = [
+  "not_configured",
+  "install_pending",
+  "active",
+  "error",
+  "disabled",
+] as const;
+export type AgentSlackAppInstallStatus = (typeof AGENT_SLACK_APP_INSTALL_STATUSES)[number];
+
+export const PROJECT_SLACK_CHANNEL_STATUSES = ["pending", "active", "error", "archived"] as const;
+export type ProjectSlackChannelStatus = (typeof PROJECT_SLACK_CHANNEL_STATUSES)[number];
+
+export const PROJECT_SLACK_MEMBERSHIP_SYNC_STATUSES = [
+  "pending",
+  "active",
+  "error",
+  "removed",
+] as const;
+export type ProjectSlackMembershipSyncStatus = (typeof PROJECT_SLACK_MEMBERSHIP_SYNC_STATUSES)[number];
 
 export const PROJECT_COLORS = [
   "#6366f1", // indigo

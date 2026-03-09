@@ -1,6 +1,14 @@
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { projects, projectGoals, goals, projectWorkspaces } from "@paperclipai/db";
+import {
+  agents,
+  goals,
+  projectGoals,
+  projectMembers,
+  projectSlackChannels,
+  projectWorkspaces,
+  projects,
+} from "@paperclipai/db";
 import {
   PROJECT_COLORS,
   deriveProjectUrlKey,
@@ -9,6 +17,8 @@ import {
   readReferenceAliases,
   type ReferenceAliases,
   type ProjectGoalRef,
+  type ProjectMember,
+  type ProjectSlackChannelSummary,
   type ProjectWorkspace,
 } from "@paperclipai/shared";
 import {
@@ -34,6 +44,8 @@ interface ProjectWithGoals extends ProjectRow {
   urlKey: string;
   goalIds: string[];
   goals: ProjectGoalRef[];
+  members: ProjectMember[];
+  slackChannel: ProjectSlackChannelSummary | null;
   workspaces: ProjectWorkspace[];
   primaryWorkspace: ProjectWorkspace | null;
 }
@@ -105,6 +117,23 @@ function pickPrimaryWorkspace(rows: ProjectWorkspaceRow[]): ProjectWorkspace | n
   return toWorkspace(explicitPrimary ?? rows[0]);
 }
 
+function toProjectSlackChannelSummary(
+  row: typeof projectSlackChannels.$inferSelect,
+): ProjectSlackChannelSummary {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    channelId: row.channelId,
+    channelName: row.channelName,
+    visibility: row.visibility as ProjectSlackChannelSummary["visibility"],
+    status: row.status as ProjectSlackChannelSummary["status"],
+    lastError: row.lastError,
+    archivedAt: row.archivedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
 /** Batch-load workspace refs for a set of projects. */
 async function attachWorkspaces(db: Db, rows: ProjectWithGoals[]): Promise<ProjectWithGoals[]> {
   if (rows.length === 0) return [];
@@ -135,6 +164,56 @@ async function attachWorkspaces(db: Db, rows: ProjectWithGoals[]): Promise<Proje
       primaryWorkspace: pickPrimaryWorkspace(projectWorkspaceRows),
     };
   });
+}
+
+async function attachMembers(db: Db, rows: ProjectWithGoals[]): Promise<ProjectWithGoals[]> {
+  if (rows.length === 0) return [];
+
+  const projectIds = rows.map((row) => row.id);
+  const memberRows = await db
+    .select()
+    .from(projectMembers)
+    .where(inArray(projectMembers.projectId, projectIds))
+    .orderBy(asc(projectMembers.createdAt), asc(projectMembers.id));
+
+  const membersByProject = new Map<string, ProjectMember[]>();
+  for (const row of memberRows) {
+    const members = membersByProject.get(row.projectId) ?? [];
+    members.push(row);
+    membersByProject.set(row.projectId, members);
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    members: membersByProject.get(row.id) ?? [],
+  }));
+}
+
+async function attachSlackChannels(db: Db, rows: ProjectWithGoals[]): Promise<ProjectWithGoals[]> {
+  if (rows.length === 0) return [];
+
+  const projectIds = rows.map((row) => row.id);
+  const slackChannelRows = await db
+    .select()
+    .from(projectSlackChannels)
+    .where(inArray(projectSlackChannels.projectId, projectIds));
+
+  const byProjectId = new Map(
+    slackChannelRows.map((row) => [row.projectId, toProjectSlackChannelSummary(row)] as const),
+  );
+  return rows.map((row) => ({
+    ...row,
+    slackChannel: byProjectId.get(row.id) ?? null,
+  }));
+}
+
+async function hydrateProjects(db: Db, rows: ProjectRow[]): Promise<ProjectWithGoals[]> {
+  if (rows.length === 0) return [];
+
+  const withGoals = await attachGoals(db, rows);
+  const withMembers = await attachMembers(db, withGoals);
+  const withSlackChannels = await attachSlackChannels(db, withMembers);
+  return attachWorkspaces(db, withSlackChannels);
 }
 
 /** Sync the project_goals join table for a single project. */
@@ -263,8 +342,7 @@ export function projectService(db: Db) {
       const referenceRows = await listReferenceRows(companyId);
       const resolvedAliases = resolveEntityReferenceAliases("project", referenceRows);
       const hydratedRows = rows.map((row) => applyProjectReferenceAliases(row, resolvedAliases));
-      const withGoals = await attachGoals(db, hydratedRows);
-      return attachWorkspaces(db, withGoals);
+      return hydrateProjects(db, hydratedRows);
     },
 
     listByIds: async (companyId: string, ids: string[]): Promise<ProjectWithGoals[]> => {
@@ -277,8 +355,7 @@ export function projectService(db: Db) {
       const referenceRows = await listReferenceRows(companyId);
       const resolvedAliases = resolveEntityReferenceAliases("project", referenceRows);
       const hydratedRows = rows.map((row) => applyProjectReferenceAliases(row, resolvedAliases));
-      const withGoals = await attachGoals(db, hydratedRows);
-      const withWorkspaces = await attachWorkspaces(db, withGoals);
+      const withWorkspaces = await hydrateProjects(db, hydratedRows);
       const byId = new Map(withWorkspaces.map((project) => [project.id, project]));
       return dedupedIds.map((id) => byId.get(id)).filter((project): project is ProjectWithGoals => Boolean(project));
     },
@@ -292,9 +369,7 @@ export function projectService(db: Db) {
       if (!row) return null;
       const referenceRows = await listReferenceRows(row.companyId);
       const resolvedAliases = resolveEntityReferenceAliases("project", referenceRows);
-      const [withGoals] = await attachGoals(db, [applyProjectReferenceAliases(row, resolvedAliases)]);
-      if (!withGoals) return null;
-      const [enriched] = await attachWorkspaces(db, [withGoals]);
+      const [enriched] = await hydrateProjects(db, [applyProjectReferenceAliases(row, resolvedAliases)]);
       return enriched ?? null;
     },
 
@@ -354,8 +429,7 @@ export function projectService(db: Db) {
         await syncGoalLinks(db, row.id, companyId, ids);
       }
 
-      const [withGoals] = await attachGoals(db, [row]);
-      const [enriched] = withGoals ? await attachWorkspaces(db, [withGoals]) : [];
+      const [enriched] = await hydrateProjects(db, [row]);
       return enriched!;
     },
 
@@ -442,8 +516,7 @@ export function projectService(db: Db) {
         await syncGoalLinks(db, id, row.companyId, ids);
       }
 
-      const [withGoals] = await attachGoals(db, [row]);
-      const [enriched] = withGoals ? await attachWorkspaces(db, [withGoals]) : [];
+      const [enriched] = await hydrateProjects(db, [row]);
       return enriched ?? null;
     },
 
@@ -738,6 +811,110 @@ export function projectService(db: Db) {
         return { project: null, ambiguous: true } as const;
       }
       return { project: null, ambiguous: false } as const;
+    },
+
+    listMembers: async (projectId: string): Promise<ProjectMember[]> =>
+      db
+        .select()
+        .from(projectMembers)
+        .where(eq(projectMembers.projectId, projectId))
+        .orderBy(asc(projectMembers.createdAt), asc(projectMembers.id)),
+
+    addMember: async (
+      projectId: string,
+      input: { agentId: string; createdByAgentId?: string | null; createdByUserId?: string | null },
+    ): Promise<ProjectMember | null> => {
+      const project = await db
+        .select({ id: projects.id, companyId: projects.companyId })
+        .from(projects)
+        .where(eq(projects.id, projectId))
+        .then((rows) => rows[0] ?? null);
+      if (!project) return null;
+
+      const agent = await db
+        .select({ id: agents.id, companyId: agents.companyId })
+        .from(agents)
+        .where(eq(agents.id, input.agentId))
+        .then((rows) => rows[0] ?? null);
+      if (!agent || agent.companyId !== project.companyId) return null;
+
+      const existing = await db
+        .select()
+        .from(projectMembers)
+        .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.agentId, input.agentId)))
+        .then((rows) => rows[0] ?? null);
+      if (existing) return existing;
+
+      return db
+        .insert(projectMembers)
+        .values({
+          companyId: project.companyId,
+          projectId,
+          agentId: input.agentId,
+          createdByAgentId: input.createdByAgentId ?? null,
+          createdByUserId: input.createdByUserId ?? null,
+        })
+        .returning()
+        .then((rows) => rows[0] ?? null);
+    },
+
+    removeMember: async (projectId: string, agentId: string): Promise<ProjectMember | null> =>
+      db
+        .delete(projectMembers)
+        .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.agentId, agentId)))
+        .returning()
+        .then((rows) => rows[0] ?? null),
+
+    getSlackChannel: async (projectId: string): Promise<ProjectSlackChannelSummary | null> =>
+      db
+        .select()
+        .from(projectSlackChannels)
+        .where(eq(projectSlackChannels.projectId, projectId))
+        .then((rows) => (rows[0] ? toProjectSlackChannelSummary(rows[0]) : null)),
+
+    upsertSlackChannel: async (
+      projectId: string,
+      input: Partial<typeof projectSlackChannels.$inferInsert>,
+    ): Promise<ProjectSlackChannelSummary | null> => {
+      const project = await db
+        .select({ id: projects.id, companyId: projects.companyId })
+        .from(projects)
+        .where(eq(projects.id, projectId))
+        .then((rows) => rows[0] ?? null);
+      if (!project) return null;
+
+      const existing = await db
+        .select()
+        .from(projectSlackChannels)
+        .where(eq(projectSlackChannels.projectId, projectId))
+        .then((rows) => rows[0] ?? null);
+
+      if (existing) {
+        return db
+          .update(projectSlackChannels)
+          .set({
+            ...input,
+            updatedAt: new Date(),
+          })
+          .where(eq(projectSlackChannels.id, existing.id))
+          .returning()
+          .then((rows) => (rows[0] ? toProjectSlackChannelSummary(rows[0]) : null));
+      }
+
+      return db
+        .insert(projectSlackChannels)
+        .values({
+          companyId: project.companyId,
+          projectId,
+          visibility: input.visibility ?? "public",
+          status: input.status ?? "pending",
+          channelId: input.channelId ?? null,
+          channelName: input.channelName ?? null,
+          lastError: input.lastError ?? null,
+          archivedAt: input.archivedAt ?? null,
+        })
+        .returning()
+        .then((rows) => (rows[0] ? toProjectSlackChannelSummary(rows[0]) : null));
     },
   };
 }

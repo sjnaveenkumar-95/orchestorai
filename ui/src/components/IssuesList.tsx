@@ -7,6 +7,7 @@ import { issuesApi } from "../api/issues";
 import { queryKeys } from "../lib/queryKeys";
 import { groupBy } from "../lib/groupBy";
 import { formatDate, cn } from "../lib/utils";
+import { filterAssignableAgents } from "../lib/assignable-agents";
 import { StatusIcon } from "./StatusIcon";
 import { PriorityIcon } from "./PriorityIcon";
 import { EmptyState } from "./EmptyState";
@@ -138,6 +139,7 @@ interface IssuesListProps {
   isLoading?: boolean;
   error?: Error | null;
   agents?: Agent[];
+  projectMemberAgentIds?: string[] | null;
   liveIssueIds?: Set<string>;
   projectId?: string;
   viewStateKey: string;
@@ -152,6 +154,7 @@ export function IssuesList({
   isLoading,
   error,
   agents,
+  projectMemberAgentIds,
   liveIssueIds,
   projectId,
   viewStateKey,
@@ -232,6 +235,10 @@ export function IssuesList({
   });
 
   const activeFilterCount = countActiveFilters(viewState);
+  const availableAssigneeAgents = useMemo(
+    () => filterAssignableAgents(agents, projectMemberAgentIds),
+    [agents, projectMemberAgentIds],
+  );
 
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   useEffect(() => {
@@ -434,11 +441,11 @@ export function IssuesList({
                     </div>
 
                     {/* Assignee */}
-                    {agents && agents.length > 0 && (
+                    {availableAssigneeAgents.length > 0 && (
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground">Assignee</span>
                         <div className="space-y-0.5 max-h-32 overflow-y-auto">
-                          {agents.map((agent) => (
+                          {availableAssigneeAgents.map((agent) => (
                             <label key={agent.id} className="flex items-center gap-2 px-2 py-1 rounded-sm hover:bg-accent/50 cursor-pointer">
                               <Checkbox
                                 checked={viewState.assignees.includes(agent.id)}
@@ -707,7 +714,7 @@ export function IssuesList({
                             >
                               No assignee
                             </button>
-                            {(agents ?? [])
+                            {availableAssigneeAgents
                               .filter((agent) => {
                                 if (!assigneeSearch.trim()) return true;
                                 return agent.name.toLowerCase().includes(assigneeSearch.toLowerCase());

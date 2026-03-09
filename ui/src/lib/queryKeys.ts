@@ -7,6 +7,7 @@ export const queryKeys = {
   agents: {
     list: (companyId: string) => ["agents", companyId] as const,
     detail: (id: string) => ["agents", "detail", id] as const,
+    slackApp: (id: string) => ["agents", "slack-app", id] as const,
     runtimeState: (id: string) => ["agents", "runtime-state", id] as const,
     taskSessions: (id: string) => ["agents", "task-sessions", id] as const,
     keys: (agentId: string) => ["agents", "keys", agentId] as const,
@@ -36,6 +37,8 @@ export const queryKeys = {
   projects: {
     list: (companyId: string) => ["projects", companyId] as const,
     detail: (id: string) => ["projects", "detail", id] as const,
+    members: (id: string) => ["projects", "members", id] as const,
+    slack: (id: string) => ["projects", "slack", id] as const,
   },
   goals: {
     list: (companyId: string) => ["goals", companyId] as const,

@@ -4,6 +4,7 @@ import { useDialog } from "../context/DialogContext";
 import { useCompany } from "../context/CompanyContext";
 import { useToast } from "../context/ToastContext";
 import { projectsApi } from "../api/projects";
+import { agentsApi } from "../api/agents";
 import { goalsApi } from "../api/goals";
 import { assetsApi } from "../api/assets";
 import { queryKeys } from "../lib/queryKeys";
@@ -27,6 +28,7 @@ import {
   FolderOpen,
   Github,
   GitBranch,
+  Users,
 } from "lucide-react";
 import { PROJECT_COLORS } from "@paperclipai/shared";
 import { cn, projectUrl } from "../lib/utils";
@@ -34,6 +36,7 @@ import { formatProjectReferenceAlias } from "../lib/reference-aliases";
 import { MarkdownEditor, type MarkdownEditorRef } from "./MarkdownEditor";
 import { StatusBadge } from "./StatusBadge";
 import { ChoosePathButton } from "./PathInstructionsModal";
+import { Identity } from "./Identity";
 
 const projectStatuses = [
   { value: "backlog", label: "Backlog" },
@@ -55,7 +58,9 @@ export function NewProjectDialog() {
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState("planned");
   const [goalIds, setGoalIds] = useState<string[]>([]);
+  const [memberIds, setMemberIds] = useState<string[]>([]);
   const [targetDate, setTargetDate] = useState("");
+  const [slackChannelVisibility, setSlackChannelVisibility] = useState<"public" | "private">("public");
   const [expanded, setExpanded] = useState(false);
   const [workspaceSetup, setWorkspaceSetup] = useState<WorkspaceSetup>("none");
   const [workspaceLocalPath, setWorkspaceLocalPath] = useState("");
@@ -64,11 +69,18 @@ export function NewProjectDialog() {
 
   const [statusOpen, setStatusOpen] = useState(false);
   const [goalOpen, setGoalOpen] = useState(false);
+  const [memberOpen, setMemberOpen] = useState(false);
   const descriptionEditorRef = useRef<MarkdownEditorRef>(null);
 
   const { data: goals } = useQuery({
     queryKey: queryKeys.goals.list(selectedCompanyId!),
     queryFn: () => goalsApi.list(selectedCompanyId!),
+    enabled: !!selectedCompanyId && newProjectOpen,
+  });
+
+  const { data: agents } = useQuery({
+    queryKey: queryKeys.agents.list(selectedCompanyId!),
+    queryFn: () => agentsApi.list(selectedCompanyId!),
     enabled: !!selectedCompanyId && newProjectOpen,
   });
 
@@ -89,7 +101,9 @@ export function NewProjectDialog() {
     setDescription("");
     setStatus("planned");
     setGoalIds([]);
+    setMemberIds([]);
     setTargetDate("");
+    setSlackChannelVisibility("public");
     setExpanded(false);
     setWorkspaceSetup("none");
     setWorkspaceLocalPath("");
@@ -157,6 +171,7 @@ export function NewProjectDialog() {
         description: description.trim() || undefined,
         status,
         color: PROJECT_COLORS[Math.floor(Math.random() * PROJECT_COLORS.length)],
+        slackChannelVisibility,
         ...(goalIds.length > 0 ? { goalIds } : {}),
         ...(targetDate ? { targetDate } : {}),
       });
@@ -184,6 +199,9 @@ export function NewProjectDialog() {
         await projectsApi.createWorkspace(created.id, {
           ...workspacePayload,
         });
+      }
+      for (const agentId of memberIds) {
+        await projectsApi.addMember(created.id, { agentId });
       }
 
       const slackAlias = formatProjectReferenceAlias(created.metadata ?? null);
@@ -217,6 +235,10 @@ export function NewProjectDialog() {
 
   const selectedGoals = (goals ?? []).filter((g) => goalIds.includes(g.id));
   const availableGoals = (goals ?? []).filter((g) => !goalIds.includes(g.id));
+  const selectedMembers = (agents ?? []).filter((agent) => memberIds.includes(agent.id));
+  const availableMembers = (agents ?? []).filter(
+    (agent) => agent.status !== "terminated" && !memberIds.includes(agent.id),
+  );
 
   return (
     <Dialog
@@ -458,6 +480,73 @@ export function NewProjectDialog() {
               )}
             </PopoverContent>
           </Popover>
+
+          {selectedMembers.map((agent) => (
+            <span
+              key={agent.id}
+              className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs"
+            >
+              <Identity name={agent.name} size="xs" className="max-w-[150px]" />
+              <button
+                className="text-muted-foreground hover:text-foreground"
+                onClick={() => setMemberIds((prev) => prev.filter((id) => id !== agent.id))}
+                aria-label={`Remove member ${agent.name}`}
+                type="button"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+
+          <Popover open={memberOpen} onOpenChange={setMemberOpen}>
+            <PopoverTrigger asChild>
+              <button
+                className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent/50 transition-colors disabled:opacity-60"
+                disabled={availableMembers.length === 0}
+              >
+                <Users className="h-3 w-3 text-muted-foreground" />
+                {selectedMembers.length > 0 ? "+ Member" : "Members"}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-56 p-1" align="start">
+              {availableMembers.length === 0 ? (
+                <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                  All active agents already selected.
+                </div>
+              ) : (
+                availableMembers.map((agent) => (
+                  <button
+                    key={agent.id}
+                    className="flex items-center w-full px-2 py-1.5 text-xs rounded hover:bg-accent/50"
+                    onClick={() => {
+                      setMemberIds((prev) => [...prev, agent.id]);
+                      setMemberOpen(false);
+                    }}
+                  >
+                    <Identity name={agent.name} size="xs" />
+                  </button>
+                ))
+              )}
+            </PopoverContent>
+          </Popover>
+
+          <div className="inline-flex items-center gap-1 rounded-md border border-border px-1 py-1 text-xs">
+            {(["public", "private"] as const).map((visibility) => (
+              <button
+                key={visibility}
+                type="button"
+                className={cn(
+                  "rounded px-2 py-0.5 capitalize transition-colors",
+                  slackChannelVisibility === visibility
+                    ? "bg-accent text-foreground"
+                    : "text-muted-foreground hover:bg-accent/50",
+                )}
+                onClick={() => setSlackChannelVisibility(visibility)}
+              >
+                {visibility}
+              </button>
+            ))}
+          </div>
 
           {/* Target date */}
           <div className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs">

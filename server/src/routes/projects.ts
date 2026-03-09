@@ -2,19 +2,22 @@ import { Router, type Request } from "express";
 import type { Db } from "@paperclipai/db";
 import {
   createProjectSchema,
+  createProjectMemberSchema,
   createProjectWorkspaceSchema,
   isUuidLike,
   updateProjectSchema,
   updateProjectWorkspaceSchema,
 } from "@paperclipai/shared";
 import { validate } from "../middleware/validate.js";
-import { projectService, logActivity } from "../services/index.js";
+import { projectService, slackIntegrationService, logActivity } from "../services/index.js";
 import { conflict } from "../errors.js";
 import { assertCompanyAccess, getActorInfo } from "./authz.js";
+import { logger } from "../middleware/logger.js";
 
 export function projectRoutes(db: Db) {
   const router = Router();
   const svc = projectService(db);
+  const slackSvc = slackIntegrationService(db);
 
   async function resolveCompanyIdForProjectReference(req: Request) {
     const companyIdQuery = req.query.companyId;
@@ -89,7 +92,15 @@ export function projectRoutes(db: Db) {
       }
       createdWorkspaceId = createdWorkspace.id;
     }
-    const hydratedProject = workspace ? await svc.getById(project.id) : project;
+    if (project.leadAgentId) {
+      const actor = getActorInfo(req);
+      await svc.addMember(project.id, {
+        agentId: project.leadAgentId,
+        createdByAgentId: actor.actorType === "agent" ? actor.actorId : null,
+        createdByUserId: actor.actorType === "user" ? actor.actorId : null,
+      });
+    }
+    const hydratedProject = await svc.getById(project.id);
 
     const actor = getActorInfo(req);
     await logActivity(db, {
@@ -104,6 +115,9 @@ export function projectRoutes(db: Db) {
         name: project.name,
         workspaceId: createdWorkspaceId,
       },
+    });
+    void slackSvc.syncProjectSlack(project.id).catch((err) => {
+      logger.warn({ err, projectId: project.id }, "failed to sync project Slack state after project creation");
     });
     res.status(201).json(hydratedProject ?? project);
   });
@@ -134,7 +148,181 @@ export function projectRoutes(db: Db) {
       details: req.body,
     });
 
-    res.json(project);
+    if (project.leadAgentId) {
+      const actor = getActorInfo(req);
+      await svc.addMember(project.id, {
+        agentId: project.leadAgentId,
+        createdByAgentId: actor.actorType === "agent" ? actor.actorId : null,
+        createdByUserId: actor.actorType === "user" ? actor.actorId : null,
+      });
+    }
+
+    if (
+      req.body.leadAgentId !== undefined ||
+      req.body.slackChannelVisibility !== undefined ||
+      req.body.slackChannelName !== undefined ||
+      req.body.name !== undefined
+    ) {
+      void slackSvc.syncProjectSlack(project.id).catch((err) => {
+        logger.warn({ err, projectId: project.id }, "failed to sync project Slack state after project update");
+      });
+    }
+
+    const refreshedProject = await svc.getById(project.id);
+    res.json(refreshedProject ?? project);
+  });
+
+  router.get("/projects/:id/members", async (req, res) => {
+    const id = req.params.id as string;
+    const existing = await svc.getById(id);
+    if (!existing) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    assertCompanyAccess(req, existing.companyId);
+    const members = await svc.listMembers(id);
+    res.json(members);
+  });
+
+  router.post("/projects/:id/members", validate(createProjectMemberSchema), async (req, res) => {
+    const id = req.params.id as string;
+    const existing = await svc.getById(id);
+    if (!existing) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    assertCompanyAccess(req, existing.companyId);
+
+    const actor = getActorInfo(req);
+    const member = await svc.addMember(id, {
+      agentId: req.body.agentId,
+      createdByAgentId: actor.actorType === "agent" ? actor.actorId : null,
+      createdByUserId: actor.actorType === "user" ? actor.actorId : null,
+    });
+    if (!member) {
+      res.status(422).json({ error: "Agent must belong to the same company as the project" });
+      return;
+    }
+
+    const slackState = await slackSvc.syncProjectSlack(id);
+    await logActivity(db, {
+      companyId: existing.companyId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId: actor.agentId,
+      action: "project.member_added",
+      entityType: "project",
+      entityId: id,
+      details: {
+        memberAgentId: member.agentId,
+        slackChannelId: slackState.channel?.channelId ?? null,
+      },
+    });
+
+    res.status(201).json(member);
+  });
+
+  router.delete("/projects/:id/members/:agentId", async (req, res) => {
+    const id = req.params.id as string;
+    const agentId = req.params.agentId as string;
+    const existing = await svc.getById(id);
+    if (!existing) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    assertCompanyAccess(req, existing.companyId);
+
+    const member = await svc.removeMember(id, agentId);
+    if (!member) {
+      res.status(404).json({ error: "Project member not found" });
+      return;
+    }
+
+    const slackState = await slackSvc.syncProjectSlack(id);
+    const actor = getActorInfo(req);
+    await logActivity(db, {
+      companyId: existing.companyId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId: actor.agentId,
+      action: "project.member_removed",
+      entityType: "project",
+      entityId: id,
+      details: {
+        memberAgentId: member.agentId,
+        slackChannelId: slackState.channel?.channelId ?? null,
+      },
+    });
+
+    res.json(member);
+  });
+
+  router.get("/projects/:id/slack", async (req, res) => {
+    const id = req.params.id as string;
+    const existing = await svc.getById(id);
+    if (!existing) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    assertCompanyAccess(req, existing.companyId);
+    const slackState = await slackSvc.listProjectSlackState(id);
+    res.json(slackState);
+  });
+
+  router.post("/projects/:id/slack/sync", async (req, res) => {
+    const id = req.params.id as string;
+    const existing = await svc.getById(id);
+    if (!existing) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    assertCompanyAccess(req, existing.companyId);
+
+    const slackState = await slackSvc.syncProjectSlack(id);
+    const actor = getActorInfo(req);
+    await logActivity(db, {
+      companyId: existing.companyId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId: actor.agentId,
+      action: "project.slack_synced",
+      entityType: "project",
+      entityId: id,
+      details: {
+        channelId: slackState.channel?.channelId ?? null,
+        channelStatus: slackState.channel?.status ?? null,
+      },
+    });
+
+    res.json(slackState);
+  });
+
+  router.post("/projects/:id/slack/archive", async (req, res) => {
+    const id = req.params.id as string;
+    const existing = await svc.getById(id);
+    if (!existing) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    assertCompanyAccess(req, existing.companyId);
+
+    const slackState = await slackSvc.archiveProjectChannel(id);
+    const actor = getActorInfo(req);
+    await logActivity(db, {
+      companyId: existing.companyId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId: actor.agentId,
+      action: "project.slack_archived",
+      entityType: "project",
+      entityId: id,
+      details: {
+        channelId: slackState.channel?.channelId ?? null,
+        channelStatus: slackState.channel?.status ?? null,
+      },
+    });
+
+    res.json(slackState);
   });
 
   router.get("/projects/:id/workspaces", async (req, res) => {

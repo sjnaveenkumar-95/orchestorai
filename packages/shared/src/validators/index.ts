@@ -54,6 +54,10 @@ export {
   type CreateProjectWorkspace,
   type UpdateProjectWorkspace,
 } from "./project.js";
+export {
+  createProjectMemberSchema,
+  type CreateProjectMember,
+} from "./project-member.js";
 
 export {
   createIssueSchema,

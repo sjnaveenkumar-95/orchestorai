@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   InstanceRuntimeSecretStatus,
+  InstanceRuntimeValueStatus,
   UpdateInstanceRuntimeSettings
 } from "@paperclipai/shared";
 import { useCompany } from "../context/CompanyContext";
@@ -54,6 +55,10 @@ export function CompanySettings() {
   const [snippetCopyDelightId, setSnippetCopyDelightId] = useState(0);
   const [slackBotToken, setSlackBotToken] = useState("");
   const [slackAppToken, setSlackAppToken] = useState("");
+  const [slackManifestToken, setSlackManifestToken] = useState("");
+  const [slackSigningSecret, setSlackSigningSecret] = useState("");
+  const [authPublicBaseUrl, setAuthPublicBaseUrl] = useState("");
+  const [slackDefaultChannelMemberIds, setSlackDefaultChannelMemberIds] = useState("");
   const [betterAuthSecret, setBetterAuthSecret] = useState("");
 
   const generalDirty =
@@ -151,6 +156,10 @@ export function CompanySettings() {
       queryClient.setQueryData(queryKeys.instance.runtimeSettings, settings);
       setSlackBotToken("");
       setSlackAppToken("");
+      setSlackManifestToken("");
+      setSlackSigningSecret("");
+      setAuthPublicBaseUrl("");
+      setSlackDefaultChannelMemberIds("");
       setBetterAuthSecret("");
     }
   });
@@ -206,17 +215,33 @@ export function CompanySettings() {
   }
 
   const runtimeDirty =
+    authPublicBaseUrl.trim().length > 0 ||
+    slackDefaultChannelMemberIds.trim().length > 0 ||
     slackBotToken.trim().length > 0 ||
     slackAppToken.trim().length > 0 ||
+    slackManifestToken.trim().length > 0 ||
+    slackSigningSecret.trim().length > 0 ||
     betterAuthSecret.trim().length > 0;
 
   function handleSaveRuntimeSecrets() {
     const data: UpdateInstanceRuntimeSettings = {};
+    if (authPublicBaseUrl.trim()) {
+      data.authPublicBaseUrl = authPublicBaseUrl.trim();
+    }
+    if (slackDefaultChannelMemberIds.trim()) {
+      data.slackDefaultChannelMemberIds = slackDefaultChannelMemberIds.trim();
+    }
     if (slackBotToken.trim()) {
       data.slackBotToken = slackBotToken.trim();
     }
     if (slackAppToken.trim()) {
       data.slackAppToken = slackAppToken.trim();
+    }
+    if (slackManifestToken.trim()) {
+      data.slackManifestToken = slackManifestToken.trim();
+    }
+    if (slackSigningSecret.trim()) {
+      data.slackSigningSecret = slackSigningSecret.trim();
     }
     if (betterAuthSecret.trim()) {
       data.betterAuthSecret = betterAuthSecret.trim();
@@ -345,10 +370,10 @@ export function CompanySettings() {
         </div>
         <div className="space-y-3 rounded-md border border-border px-4 py-4">
           <div className="space-y-1">
-            <div className="text-sm font-medium">Slack and auth secrets</div>
+            <div className="text-sm font-medium">Runtime connectivity and Slack settings</div>
             <p className="text-xs text-muted-foreground">
-              These values are saved to the Paperclip instance env file and
-              apply to the whole Paperclip runtime.
+              These values are saved to the global Paperclip instance env file
+              under your Paperclip home directory and apply to the whole runtime.
             </p>
             {instanceSettingsQuery.data?.envFilePath && (
               <p className="text-xs text-muted-foreground">
@@ -376,8 +401,48 @@ export function CompanySettings() {
           {instanceSettingsQuery.data && (
             <>
               <Field
+                label="Public base URL"
+                hint="The externally reachable Paperclip base URL used for Slack OAuth callbacks and Slack event delivery. Saved as PAPERCLIP_AUTH_PUBLIC_BASE_URL."
+              >
+                <input
+                  className="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm font-mono outline-none"
+                  type="url"
+                  value={authPublicBaseUrl}
+                  placeholder={
+                    instanceSettingsQuery.data.authPublicBaseUrl.value ??
+                    "https://paperclip.example.com"
+                  }
+                  onChange={(e) => setAuthPublicBaseUrl(e.target.value)}
+                />
+              </Field>
+              <p className="text-xs text-muted-foreground">
+                {describeRuntimeValue(instanceSettingsQuery.data.authPublicBaseUrl)}
+              </p>
+
+              <Field
+                label="SLACK_DEFAULT_CHANNEL_MEMBER_IDS"
+                hint="Comma-separated Slack member IDs to auto-invite into every new or resynced project channel. Saved as SLACK_DEFAULT_CHANNEL_MEMBER_IDS in the global Paperclip env file."
+              >
+                <input
+                  className="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm font-mono outline-none"
+                  type="text"
+                  value={slackDefaultChannelMemberIds}
+                  placeholder={
+                    instanceSettingsQuery.data.slackDefaultChannelMemberIds.value ??
+                    "U01234567,U089ABCDE"
+                  }
+                  onChange={(e) => setSlackDefaultChannelMemberIds(e.target.value)}
+                />
+              </Field>
+              <p className="text-xs text-muted-foreground">
+                {describeRuntimeValue(
+                  instanceSettingsQuery.data.slackDefaultChannelMemberIds
+                )}
+              </p>
+
+              <Field
                 label="SLACK_BOT_TOKEN"
-                hint="Socket mode requires the bot token. Saving here writes it to the Paperclip instance env file."
+                hint="Required for the shared Slack control app to create project channels, invite agent bots, and post shared Slack updates."
               >
                 <input
                   className="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm font-mono outline-none"
@@ -397,8 +462,8 @@ export function CompanySettings() {
               </p>
 
               <Field
-                label="SLACK_APP_TOKEN"
-                hint="Socket mode requires the app-level token. Saving here writes it to the Paperclip instance env file."
+                label="SLACK_APP_TOKEN (legacy)"
+                hint="Only needed for the older socket-mode Slack bot. The new project-channel Slack flow does not use this token."
               >
                 <input
                   className="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm font-mono outline-none"
@@ -414,6 +479,48 @@ export function CompanySettings() {
               <p className="text-xs text-muted-foreground">
                 {describeRuntimeSecret(
                   instanceSettingsQuery.data.secrets.slackAppToken
+                )}
+              </p>
+
+              <Field
+                label="SLACK_APP_MANIFEST_TOKEN"
+                hint="Required for automatic per-agent Slack app creation via Slack app manifests."
+              >
+                <input
+                  className="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm font-mono outline-none"
+                  type="password"
+                  value={slackManifestToken}
+                  placeholder={
+                    instanceSettingsQuery.data.secrets.slackManifestToken
+                      .maskedValue ?? "Not configured"
+                  }
+                  onChange={(e) => setSlackManifestToken(e.target.value)}
+                />
+              </Field>
+              <p className="text-xs text-muted-foreground">
+                {describeRuntimeSecret(
+                  instanceSettingsQuery.data.secrets.slackManifestToken
+                )}
+              </p>
+
+              <Field
+                label="SLACK_SIGNING_SECRET"
+                hint="Required for Paperclip to receive verified message events from the shared control Slack app."
+              >
+                <input
+                  className="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm font-mono outline-none"
+                  type="password"
+                  value={slackSigningSecret}
+                  placeholder={
+                    instanceSettingsQuery.data.secrets.slackSigningSecret
+                      .maskedValue ?? "Not configured"
+                  }
+                  onChange={(e) => setSlackSigningSecret(e.target.value)}
+                />
+              </Field>
+              <p className="text-xs text-muted-foreground">
+                {describeRuntimeSecret(
+                  instanceSettingsQuery.data.secrets.slackSigningSecret
                 )}
               </p>
 
@@ -439,9 +546,8 @@ export function CompanySettings() {
               </p>
 
               <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-muted-foreground">
-                Restart Paperclip after saving these values. The server auth
-                secret and integrated Slack bot credentials are loaded at
-                startup.
+                Restart Paperclip after saving these values. The public base URL,
+                auth secret, and integrated Slack credentials are loaded at startup.
               </div>
 
               <div className="flex items-center gap-2">
@@ -452,11 +558,11 @@ export function CompanySettings() {
                 >
                   {runtimeMutation.isPending
                     ? "Saving..."
-                    : "Save runtime secrets"}
+                    : "Save runtime settings"}
                 </Button>
                 {runtimeMutation.isSuccess && (
                   <span className="text-xs text-muted-foreground">
-                    Saved to the instance env file
+                    Saved to the global Paperclip env file
                   </span>
                 )}
                 {runtimeMutation.isError && (
@@ -621,14 +727,34 @@ function describeRuntimeSecret(secret: InstanceRuntimeSecretStatus) {
   }
 
   if (secret.source === "paperclip_env") {
-    return `${secret.envKey} is currently sourced from the Paperclip instance env file (${secret.maskedValue}).`;
+    return `${secret.envKey} is currently sourced from the global Paperclip env file (${secret.maskedValue}).`;
   }
 
   if (secret.source === "process_env") {
-    return `${secret.envKey} is currently only present in the process environment (${secret.maskedValue}). Saving here will move it into the Paperclip instance env file.`;
+    return `${secret.envKey} is currently only present in the process environment (${secret.maskedValue}). Saving here will move it into the global Paperclip env file.`;
   }
 
   return `${secret.envKey} is configured (${secret.maskedValue}).`;
+}
+
+function describeRuntimeValue(setting: InstanceRuntimeValueStatus) {
+  if (!setting.configured) {
+    return `${setting.envKey} is not configured yet.`;
+  }
+
+  if (setting.source === "paperclip_env") {
+    return `${setting.envKey} is currently sourced from the global Paperclip env file (${setting.value}).`;
+  }
+
+  if (setting.source === "process_env") {
+    return `${setting.envKey} is currently only present in the process environment (${setting.value}). Saving here will move it into the global Paperclip env file.`;
+  }
+
+  if (setting.source === "config_file") {
+    return `${setting.envKey} currently falls back to the Paperclip config file (${setting.value}). Saving here will override it in the global Paperclip env file.`;
+  }
+
+  return `${setting.envKey} is configured (${setting.value}).`;
 }
 
 function buildAgentSnippet(input: AgentSnippetInput) {

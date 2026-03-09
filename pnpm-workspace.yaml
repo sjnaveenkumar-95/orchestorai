@@ -1,6 +1,8 @@
 packages:
   - packages/*
-  - packages/adapters/*
+  - packages/adapters/claude-local
+  - packages/adapters/codex-local
+  - packages/adapters/openclaw
   - server
   - ui
   - cli

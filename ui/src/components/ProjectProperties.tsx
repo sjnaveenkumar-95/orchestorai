@@ -1,10 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "@/lib/router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Project } from "@paperclipai/shared";
+import {
+  buildProjectSlackChannelName,
+  normalizeSlackChannelName,
+  type Project,
+} from "@paperclipai/shared";
 import { StatusBadge } from "./StatusBadge";
 import { cn, formatDate } from "../lib/utils";
 import { goalsApi } from "../api/goals";
+import { agentsApi } from "../api/agents";
 import { projectsApi } from "../api/projects";
 import { useCompany } from "../context/CompanyContext";
 import { queryKeys } from "../lib/queryKeys";
@@ -15,6 +20,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ExternalLink, Github, Plus, Trash2, X } from "lucide-react";
 import { ChoosePathButton } from "./PathInstructionsModal";
+import { Identity } from "./Identity";
 
 const PROJECT_STATUSES = [
   { value: "backlog", label: "Backlog" },
@@ -77,18 +83,39 @@ function ProjectStatusPicker({ status, onChange }: { status: string; onChange: (
 }
 
 export function ProjectProperties({ project, onUpdate }: ProjectPropertiesProps) {
-  const { selectedCompanyId } = useCompany();
+  const { selectedCompanyId, selectedCompany } = useCompany();
   const queryClient = useQueryClient();
   const [goalOpen, setGoalOpen] = useState(false);
+  const [memberOpen, setMemberOpen] = useState(false);
   const [workspaceMode, setWorkspaceMode] = useState<"local" | "repo" | null>(null);
   const [workspaceCwd, setWorkspaceCwd] = useState("");
   const [workspaceRepoUrl, setWorkspaceRepoUrl] = useState("");
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const companyId = project.companyId ?? selectedCompanyId ?? undefined;
+  const defaultSlackChannelName = buildProjectSlackChannelName(
+    selectedCompany?.id === project.companyId ? selectedCompany.name : "company",
+    project.name,
+  );
+  const [slackChannelNameInput, setSlackChannelNameInput] = useState(
+    project.slackChannelName ?? defaultSlackChannelName,
+  );
 
   const { data: allGoals } = useQuery({
-    queryKey: queryKeys.goals.list(selectedCompanyId!),
-    queryFn: () => goalsApi.list(selectedCompanyId!),
-    enabled: !!selectedCompanyId,
+    queryKey: queryKeys.goals.list(companyId!),
+    queryFn: () => goalsApi.list(companyId!),
+    enabled: !!companyId,
+  });
+
+  const { data: agents } = useQuery({
+    queryKey: queryKeys.agents.list(companyId!),
+    queryFn: () => agentsApi.list(companyId!),
+    enabled: !!companyId,
+  });
+
+  const { data: slackState } = useQuery({
+    queryKey: queryKeys.projects.slack(project.id),
+    queryFn: () => projectsApi.getSlackState(project.id, companyId),
+    enabled: !!companyId,
   });
 
   const linkedGoalIds = project.goalIds.length > 0
@@ -106,16 +133,32 @@ export function ProjectProperties({ project, onUpdate }: ProjectPropertiesProps)
 
   const availableGoals = (allGoals ?? []).filter((g) => !linkedGoalIds.includes(g.id));
   const workspaces = project.workspaces ?? [];
+  const projectMembers = project.members ?? [];
+  const agentById = new Map((agents ?? []).map((agent) => [agent.id, agent] as const));
+  const leadAgent = project.leadAgentId ? agentById.get(project.leadAgentId) ?? null : null;
+  const availableAgents = (agents ?? []).filter(
+    (agent) => agent.status !== "terminated" && !projectMembers.some((member) => member.agentId === agent.id),
+  );
+  const savedSlackChannelName = project.slackChannelName ?? defaultSlackChannelName;
+  const normalizedSlackChannelNameInput =
+    normalizeSlackChannelName(slackChannelNameInput) ?? defaultSlackChannelName;
+  const slackChannelNameDirty = normalizedSlackChannelNameInput !== savedSlackChannelName;
+
+  useEffect(() => {
+    setSlackChannelNameInput(project.slackChannelName ?? defaultSlackChannelName);
+  }, [project.slackChannelName, defaultSlackChannelName]);
 
   const invalidateProject = () => {
     queryClient.invalidateQueries({ queryKey: queryKeys.projects.detail(project.id) });
-    if (selectedCompanyId) {
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects.list(selectedCompanyId) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.projects.slack(project.id) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.projects.members(project.id) });
+    if (companyId) {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.list(companyId) });
     }
   };
 
   const createWorkspace = useMutation({
-    mutationFn: (data: Record<string, unknown>) => projectsApi.createWorkspace(project.id, data),
+    mutationFn: (data: Record<string, unknown>) => projectsApi.createWorkspace(project.id, data, companyId),
     onSuccess: () => {
       setWorkspaceCwd("");
       setWorkspaceRepoUrl("");
@@ -126,12 +169,31 @@ export function ProjectProperties({ project, onUpdate }: ProjectPropertiesProps)
   });
 
   const removeWorkspace = useMutation({
-    mutationFn: (workspaceId: string) => projectsApi.removeWorkspace(project.id, workspaceId),
+    mutationFn: (workspaceId: string) => projectsApi.removeWorkspace(project.id, workspaceId, companyId),
     onSuccess: invalidateProject,
   });
   const updateWorkspace = useMutation({
     mutationFn: ({ workspaceId, data }: { workspaceId: string; data: Record<string, unknown> }) =>
-      projectsApi.updateWorkspace(project.id, workspaceId, data),
+      projectsApi.updateWorkspace(project.id, workspaceId, data, companyId),
+    onSuccess: invalidateProject,
+  });
+  const addMember = useMutation({
+    mutationFn: (agentId: string) => projectsApi.addMember(project.id, { agentId }, companyId),
+    onSuccess: () => {
+      setMemberOpen(false);
+      invalidateProject();
+    },
+  });
+  const removeMember = useMutation({
+    mutationFn: (agentId: string) => projectsApi.removeMember(project.id, agentId, companyId),
+    onSuccess: invalidateProject,
+  });
+  const syncSlack = useMutation({
+    mutationFn: () => projectsApi.syncSlack(project.id, companyId),
+    onSuccess: invalidateProject,
+  });
+  const archiveSlack = useMutation({
+    mutationFn: () => projectsApi.archiveSlack(project.id, companyId),
     onSuccess: invalidateProject,
   });
 
@@ -253,6 +315,24 @@ export function ProjectProperties({ project, onUpdate }: ProjectPropertiesProps)
     removeWorkspace.mutate(workspace.id);
   };
 
+  const handleArchiveSlack = () => {
+    const confirmed = window.confirm(
+      "Archive the current Slack channel for this project? You can recreate a new one with Sync.",
+    );
+    if (!confirmed) return;
+    archiveSlack.mutate();
+  };
+
+  const saveSlackChannelName = () => {
+    if (!onUpdate) return;
+    onUpdate({
+      slackChannelName:
+        normalizedSlackChannelNameInput === defaultSlackChannelName
+          ? null
+          : normalizedSlackChannelNameInput,
+    });
+  };
+
   return (
     <div className="space-y-4">
       <div className="space-y-1">
@@ -268,9 +348,215 @@ export function ProjectProperties({ project, onUpdate }: ProjectPropertiesProps)
         </PropertyRow>
         {project.leadAgentId && (
           <PropertyRow label="Lead">
-            <span className="text-sm font-mono">{project.leadAgentId.slice(0, 8)}</span>
+            <span className="text-sm">{leadAgent?.name ?? project.leadAgentId.slice(0, 8)}</span>
           </PropertyRow>
         )}
+        <PropertyRow label="Visibility">
+          {onUpdate ? (
+            <div className="flex items-center gap-1">
+              {(["public", "private"] as const).map((visibility) => (
+                <Button
+                  key={visibility}
+                  variant={project.slackChannelVisibility === visibility ? "default" : "outline"}
+                  size="xs"
+                  className="h-6 px-2 capitalize"
+                  onClick={() => onUpdate({ slackChannelVisibility: visibility })}
+                >
+                  {visibility}
+                </Button>
+              ))}
+            </div>
+          ) : (
+            <span className="text-sm capitalize">{project.slackChannelVisibility}</span>
+          )}
+        </PropertyRow>
+        <PropertyRow label="Channel">
+          <div className="flex min-w-0 flex-1 flex-col items-end gap-1.5">
+            <input
+              className="w-full max-w-[260px] rounded-md border border-border bg-transparent px-2.5 py-1.5 text-xs font-mono outline-none"
+              type="text"
+              value={slackChannelNameInput}
+              onChange={(e) => setSlackChannelNameInput(e.target.value)}
+              readOnly={!onUpdate}
+            />
+            <p className="w-full max-w-[260px] text-right text-[11px] text-muted-foreground">
+              Default: {defaultSlackChannelName}
+            </p>
+            {onUpdate && (
+              <div className="flex flex-wrap items-center justify-end gap-1.5">
+                <Button
+                  variant="outline"
+                  size="xs"
+                  className="h-6 px-2"
+                  onClick={() => setSlackChannelNameInput(defaultSlackChannelName)}
+                  disabled={slackChannelNameInput === defaultSlackChannelName}
+                >
+                  Default
+                </Button>
+                <Button
+                  variant="outline"
+                  size="xs"
+                  className="h-6 px-2"
+                  onClick={saveSlackChannelName}
+                  disabled={!slackChannelNameDirty}
+                >
+                  Save
+                </Button>
+              </div>
+            )}
+          </div>
+        </PropertyRow>
+        <div className="py-1.5 space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <span className="text-xs text-muted-foreground">Members</span>
+            <div className="flex flex-col items-end gap-1.5">
+              {projectMembers.length === 0 ? (
+                <span className="text-sm text-muted-foreground">None</span>
+              ) : (
+                <div className="flex flex-wrap justify-end gap-1.5 max-w-[260px]">
+                  {projectMembers.map((member) => {
+                    const agent = agentById.get(member.agentId) ?? null;
+                    return (
+                      <span
+                        key={member.id}
+                        className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs"
+                      >
+                        <Identity
+                          name={agent?.name ?? member.agentId.slice(0, 8)}
+                          size="xs"
+                          className="max-w-[150px]"
+                        />
+                        {onUpdate && (
+                          <button
+                            className="text-muted-foreground hover:text-foreground"
+                            type="button"
+                            onClick={() => removeMember.mutate(member.agentId)}
+                            aria-label={`Remove ${agent?.name ?? member.agentId}`}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        )}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+              {onUpdate && (
+                <Popover open={memberOpen} onOpenChange={setMemberOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      className="h-6 px-2"
+                      disabled={availableAgents.length === 0}
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      Member
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-56 p-1" align="end">
+                    {availableAgents.length === 0 ? (
+                      <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                        All active agents are already members.
+                      </div>
+                    ) : (
+                      availableAgents.map((agent) => (
+                        <button
+                          key={agent.id}
+                          className="flex items-center w-full px-2 py-1.5 text-xs rounded hover:bg-accent/50"
+                          onClick={() => addMember.mutate(agent.id)}
+                        >
+                          <Identity name={agent.name} size="xs" />
+                        </button>
+                      ))
+                    )}
+                  </PopoverContent>
+                </Popover>
+              )}
+            </div>
+          </div>
+          {(addMember.isError || removeMember.isError) && (
+            <p className="text-xs text-destructive">
+              Failed to update project members.
+            </p>
+          )}
+        </div>
+        <div className="py-1.5 space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <span className="text-xs text-muted-foreground">Slack</span>
+            <div className="flex flex-col items-end gap-1.5 max-w-[260px]">
+              <div className="flex flex-wrap items-center justify-end gap-1.5">
+                <StatusBadge status={slackState?.channel?.status ?? project.slackChannel?.status ?? "pending"} />
+                <span className="text-sm">
+                  {slackState?.channel?.channelName ?? project.slackChannel?.channelName
+                    ? `#${slackState?.channel?.channelName ?? project.slackChannel?.channelName}`
+                    : "Channel pending"}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-1.5">
+                <span className="text-xs text-muted-foreground capitalize">
+                  {project.slackChannelVisibility} channel
+                </span>
+                {slackState?.channel?.channelId && (
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    className="h-6 px-2"
+                    disabled={archiveSlack.isPending}
+                    onClick={handleArchiveSlack}
+                  >
+                    {archiveSlack.isPending ? "Removing..." : "Remove"}
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="xs"
+                  className="h-6 px-2"
+                  disabled={syncSlack.isPending}
+                  onClick={() => syncSlack.mutate()}
+                >
+                  {syncSlack.isPending ? "Syncing..." : "Sync"}
+                </Button>
+              </div>
+              {(slackState?.channel?.lastError ?? project.slackChannel?.lastError) && (
+                <p className="text-right text-xs text-destructive">
+                  {slackState?.channel?.lastError ?? project.slackChannel?.lastError}
+                </p>
+              )}
+              {slackState?.memberships && slackState.memberships.length > 0 && (
+                <div className="space-y-1 rounded-md border border-border px-2 py-2 w-full">
+                  {slackState.memberships
+                    .filter((membership) => !membership.removedAt)
+                    .map((membership) => {
+                      const agent = agentById.get(membership.agentId) ?? null;
+                      return (
+                        <div key={membership.id} className="flex items-center justify-between gap-2">
+                          <Identity
+                            name={agent?.name ?? membership.agentId.slice(0, 8)}
+                            size="xs"
+                            className="max-w-[140px]"
+                          />
+                          <div className="flex items-center gap-1.5">
+                            <StatusBadge status={membership.syncStatus} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+          </div>
+          {syncSlack.isError && (
+            <p className="text-xs text-destructive">
+              Failed to sync Slack channel state.
+            </p>
+          )}
+          {archiveSlack.isError && (
+            <p className="text-xs text-destructive">
+              Failed to remove Slack channel state.
+            </p>
+          )}
+        </div>
         <div className="py-1.5">
           <div className="flex items-start justify-between gap-2">
             <span className="text-xs text-muted-foreground">Goals</span>

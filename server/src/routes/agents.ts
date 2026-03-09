@@ -26,6 +26,7 @@ import {
   issueService,
   logActivity,
   secretService,
+  slackIntegrationService,
 } from "../services/index.js";
 import { conflict, forbidden, notFound, unprocessable } from "../errors.js";
 import { assertBoard, assertCompanyAccess, getActorInfo } from "./authz.js";
@@ -36,15 +37,12 @@ import {
   DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX,
   DEFAULT_CODEX_LOCAL_MODEL,
 } from "@paperclipai/adapter-codex-local";
-import { DEFAULT_CURSOR_LOCAL_MODEL } from "@paperclipai/adapter-cursor-local";
-import { ensureOpenCodeModelConfiguredAndAvailable } from "@paperclipai/adapter-opencode-local/server";
+import { logger } from "../middleware/logger.js";
 
 export function agentRoutes(db: Db) {
   const DEFAULT_INSTRUCTIONS_PATH_KEYS: Record<string, string> = {
     claude_local: "instructionsFilePath",
     codex_local: "instructionsFilePath",
-    opencode_local: "instructionsFilePath",
-    cursor: "instructionsFilePath",
   };
   const KNOWN_INSTRUCTIONS_PATH_KEYS = new Set(["instructionsFilePath", "agentsMdPath"]);
 
@@ -55,6 +53,7 @@ export function agentRoutes(db: Db) {
   const heartbeat = heartbeatService(db);
   const issueApprovalsSvc = issueApprovalService(db);
   const secretsSvc = secretService(db);
+  const slackSvc = slackIntegrationService(db);
   const strictSecretsMode = process.env.PAPERCLIP_SECRETS_STRICT_MODE === "true";
 
   function canCreateAgents(agent: { role: string; permissions: Record<string, unknown> | null | undefined }) {
@@ -198,32 +197,7 @@ export function agentRoutes(db: Db) {
       }
       return next;
     }
-    // OpenCode requires explicit model selection — no default
-    if (adapterType === "cursor" && !asNonEmptyString(next.model)) {
-      next.model = DEFAULT_CURSOR_LOCAL_MODEL;
-    }
     return next;
-  }
-
-  async function assertAdapterConfigConstraints(
-    companyId: string,
-    adapterType: string | null | undefined,
-    adapterConfig: Record<string, unknown>,
-  ) {
-    if (adapterType !== "opencode_local") return;
-    const runtimeConfig = await secretsSvc.resolveAdapterConfigForRuntime(companyId, adapterConfig);
-    const runtimeEnv = asRecord(runtimeConfig.env) ?? {};
-    try {
-      await ensureOpenCodeModelConfiguredAndAvailable({
-        model: runtimeConfig.model,
-        command: runtimeConfig.command,
-        cwd: runtimeConfig.cwd,
-        env: runtimeEnv,
-      });
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      throw unprocessable(`Invalid opencode_local adapterConfig: ${reason}`);
-    }
   }
 
   function resolveInstructionsFilePath(candidatePath: string, adapterConfig: Record<string, unknown>) {
@@ -462,6 +436,50 @@ export function agentRoutes(db: Db) {
     res.json({ ...agent, chainOfCommand });
   });
 
+  router.get("/agents/:id/slack", async (req, res) => {
+    const id = req.params.id as string;
+    const agent = await svc.getById(id);
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+    assertCompanyAccess(req, agent.companyId);
+    const slackApp = await slackSvc.getAgentSlackApp(id);
+    res.json(slackApp);
+  });
+
+  router.post("/agents/:id/slack/provision", async (req, res) => {
+    const id = req.params.id as string;
+    const agent = await svc.getById(id);
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+    await assertCanUpdateAgent(req, agent);
+    const actor = getActorInfo(req);
+    const slackApp = await slackSvc.provisionAgentApp(id, {
+      agentId: actor.agentId,
+      userId: actor.actorType === "user" ? actor.actorId : null,
+    });
+
+    await logActivity(db, {
+      companyId: agent.companyId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId: actor.agentId,
+      runId: actor.runId,
+      action: "agent.slack_provisioned",
+      entityType: "agent",
+      entityId: agent.id,
+      details: {
+        installStatus: slackApp.installStatus,
+        slackAppId: slackApp.slackAppId,
+      },
+    });
+
+    res.json(slackApp);
+  });
+
   router.get("/agents/:id/configuration", async (req, res) => {
     const id = req.params.id as string;
     const agent = await svc.getById(id);
@@ -613,11 +631,6 @@ export function agentRoutes(db: Db) {
       requestedAdapterConfig,
       { strictMode: strictSecretsMode },
     );
-    await assertAdapterConfigConstraints(
-      companyId,
-      hireInput.adapterType,
-      normalizedAdapterConfig,
-    );
     const normalizedHireInput = {
       ...hireInput,
       adapterConfig: normalizedAdapterConfig,
@@ -733,6 +746,15 @@ export function agentRoutes(db: Db) {
       });
     }
 
+    if (!requiresApproval) {
+      void slackSvc.provisionAgentApp(agent.id, {
+        agentId: actor.agentId,
+        userId: actor.actorType === "user" ? actor.actorId : null,
+      }).catch((err) => {
+        logger.warn({ err, agentId: agent.id }, "failed to provision Slack app after agent hire");
+      });
+    }
+
     res.status(201).json({ agent, approval });
   });
 
@@ -752,11 +774,6 @@ export function agentRoutes(db: Db) {
       companyId,
       requestedAdapterConfig,
       { strictMode: strictSecretsMode },
-    );
-    await assertAdapterConfigConstraints(
-      companyId,
-      req.body.adapterType,
-      normalizedAdapterConfig,
     );
 
     const agent = await svc.create(companyId, {
@@ -778,6 +795,13 @@ export function agentRoutes(db: Db) {
       entityType: "agent",
       entityId: agent.id,
       details: { name: agent.name, role: agent.role },
+    });
+
+    void slackSvc.provisionAgentApp(agent.id, {
+      agentId: actor.agentId,
+      userId: actor.actorType === "user" ? actor.actorId : null,
+    }).catch((err) => {
+      logger.warn({ err, agentId: agent.id }, "failed to provision Slack app after direct agent creation");
     });
 
     res.status(201).json(agent);
@@ -934,27 +958,6 @@ export function agentRoutes(db: Db) {
         existing.companyId,
         adapterConfig,
         { strictMode: strictSecretsMode },
-      );
-    }
-
-    const requestedAdapterType =
-      typeof patchData.adapterType === "string" ? patchData.adapterType : existing.adapterType;
-    const touchesAdapterConfiguration =
-      Object.prototype.hasOwnProperty.call(patchData, "adapterType") ||
-      Object.prototype.hasOwnProperty.call(patchData, "adapterConfig");
-    if (touchesAdapterConfiguration && requestedAdapterType === "opencode_local") {
-      const rawEffectiveAdapterConfig = Object.prototype.hasOwnProperty.call(patchData, "adapterConfig")
-        ? (asRecord(patchData.adapterConfig) ?? {})
-        : (asRecord(existing.adapterConfig) ?? {});
-      const effectiveAdapterConfig = await secretsSvc.normalizeAdapterConfigForPersistence(
-        existing.companyId,
-        rawEffectiveAdapterConfig,
-        { strictMode: strictSecretsMode },
-      );
-      await assertAdapterConfigConstraints(
-        existing.companyId,
-        requestedAdapterType,
-        effectiveAdapterConfig,
       );
     }
 

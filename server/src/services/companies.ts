@@ -52,9 +52,19 @@ export function companyService(db: Db) {
 
   async function createCompanyWithUniquePrefix(data: typeof companies.$inferInsert) {
     const base = deriveIssuePrefixBase(data.name);
+    const projectIssuePrefixes = await db
+      .select({ issuePrefix: projects.issuePrefix })
+      .from(projects)
+      .then((rows) =>
+        new Set(rows.map((row) => row.issuePrefix).filter((value): value is string => Boolean(value))),
+      );
     let suffix = 1;
     while (suffix < 10000) {
       const candidate = `${base}${suffixForAttempt(suffix)}`;
+      if (projectIssuePrefixes.has(candidate)) {
+        suffix += 1;
+        continue;
+      }
       try {
         const rows = await db
           .insert(companies)

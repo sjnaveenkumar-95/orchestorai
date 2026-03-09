@@ -12,6 +12,11 @@ import { queryKeys } from "../lib/queryKeys";
 import { useProjectOrder } from "../hooks/useProjectOrder";
 import { getRecentAssigneeIds, sortAgentsByRecency, trackRecentAssignee } from "../lib/recent-assignees";
 import {
+  filterAssignableAgents,
+  getProjectMemberAgentIds,
+  isAgentAssignableToProject,
+} from "../lib/assignable-agents";
+import {
   Dialog,
   DialogContent,
 } from "@/components/ui/dialog";
@@ -69,7 +74,7 @@ interface IssueDraft {
   assigneeUseProjectWorkspace: boolean;
 }
 
-const ISSUE_OVERRIDE_ADAPTER_TYPES = new Set(["claude_local", "codex_local", "opencode_local"]);
+const ISSUE_OVERRIDE_ADAPTER_TYPES = new Set(["claude_local", "codex_local"]);
 
 const ISSUE_THINKING_EFFORT_OPTIONS = {
   claude_local: [
@@ -84,14 +89,6 @@ const ISSUE_THINKING_EFFORT_OPTIONS = {
     { value: "low", label: "Low" },
     { value: "medium", label: "Medium" },
     { value: "high", label: "High" },
-  ],
-  opencode_local: [
-    { value: "", label: "Default" },
-    { value: "minimal", label: "Minimal" },
-    { value: "low", label: "Low" },
-    { value: "medium", label: "Medium" },
-    { value: "high", label: "High" },
-    { value: "max", label: "Max" },
   ],
 } as const;
 
@@ -112,12 +109,8 @@ function buildAssigneeAdapterOverrides(input: {
   if (input.thinkingEffortOverride) {
     if (adapterType === "codex_local") {
       adapterConfig.modelReasoningEffort = input.thinkingEffortOverride;
-    } else if (adapterType === "opencode_local") {
-      adapterConfig.variant = input.thinkingEffortOverride;
     } else if (adapterType === "claude_local") {
       adapterConfig.effort = input.thinkingEffortOverride;
-    } else if (adapterType === "opencode_local") {
-      adapterConfig.variant = input.thinkingEffortOverride;
     }
   }
   if (adapterType === "claude_local" && input.chrome) {
@@ -368,9 +361,7 @@ export function NewIssueDialog() {
     const validThinkingValues =
       assigneeAdapterType === "codex_local"
         ? ISSUE_THINKING_EFFORT_OPTIONS.codex_local
-        : assigneeAdapterType === "opencode_local"
-          ? ISSUE_THINKING_EFFORT_OPTIONS.opencode_local
-          : ISSUE_THINKING_EFFORT_OPTIONS.claude_local;
+        : ISSUE_THINKING_EFFORT_OPTIONS.claude_local;
     if (!validThinkingValues.some((option) => option.value === assigneeThinkingEffort)) {
       setAssigneeThinkingEffort("");
     }
@@ -463,34 +454,36 @@ export function NewIssueDialog() {
   const hasDraft = title.trim().length > 0 || description.trim().length > 0;
   const currentStatus = statuses.find((s) => s.value === status) ?? statuses[1]!;
   const currentPriority = priorities.find((p) => p.value === priority);
-  const currentAssignee = (agents ?? []).find((a) => a.id === assigneeId);
   const currentProject = orderedProjects.find((project) => project.id === projectId);
+  const selectedProjectMembersResolved = !projectId || Boolean(projects);
+  const selectedProjectMemberAgentIds = useMemo(() => {
+    if (!projectId) return null;
+    if (!selectedProjectMembersResolved) return [];
+    return getProjectMemberAgentIds(currentProject?.members ?? []);
+  }, [currentProject, projectId, selectedProjectMembersResolved]);
+  const currentAssignee = (agents ?? []).find((a) => a.id === assigneeId);
   const assigneeOptionsTitle =
     assigneeAdapterType === "claude_local"
       ? "Claude options"
       : assigneeAdapterType === "codex_local"
         ? "Codex options"
-        : assigneeAdapterType === "opencode_local"
-          ? "OpenCode options"
         : "Agent options";
   const thinkingEffortOptions =
     assigneeAdapterType === "codex_local"
       ? ISSUE_THINKING_EFFORT_OPTIONS.codex_local
-      : assigneeAdapterType === "opencode_local"
-        ? ISSUE_THINKING_EFFORT_OPTIONS.opencode_local
       : ISSUE_THINKING_EFFORT_OPTIONS.claude_local;
   const recentAssigneeIds = useMemo(() => getRecentAssigneeIds(), [newIssueOpen]);
   const assigneeOptions = useMemo<InlineEntityOption[]>(
     () =>
       sortAgentsByRecency(
-        (agents ?? []).filter((agent) => agent.status !== "terminated"),
+        filterAssignableAgents(agents, selectedProjectMemberAgentIds),
         recentAssigneeIds,
       ).map((agent) => ({
         id: agent.id,
         label: agent.name,
         searchText: `${agent.name} ${agent.role} ${agent.title ?? ""}`,
       })),
-    [agents, recentAssigneeIds],
+    [agents, recentAssigneeIds, selectedProjectMemberAgentIds],
   );
   const projectOptions = useMemo<InlineEntityOption[]>(
     () =>
@@ -519,6 +512,22 @@ export function NewIssueDialog() {
     },
     [assigneeAdapterModels],
   );
+
+  useEffect(() => {
+    if (!projectId || !assigneeId || !selectedProjectMembersResolved) return;
+    if (isAgentAssignableToProject(assigneeId, selectedProjectMemberAgentIds)) return;
+    setAssigneeId("");
+    setAssigneeOptionsOpen(false);
+    setAssigneeModelOverride("");
+    setAssigneeThinkingEffort("");
+    setAssigneeChrome(false);
+    setAssigneeUseProjectWorkspace(true);
+  }, [
+    assigneeId,
+    projectId,
+    selectedProjectMemberAgentIds,
+    selectedProjectMembersResolved,
+  ]);
 
   return (
     <Dialog

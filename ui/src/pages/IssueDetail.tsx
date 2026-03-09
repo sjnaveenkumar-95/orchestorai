@@ -13,6 +13,7 @@ import { usePanel } from "../context/PanelContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { queryKeys } from "../lib/queryKeys";
 import { useProjectOrder } from "../hooks/useProjectOrder";
+import { filterAssignableAgents, getProjectMemberAgentIds } from "../lib/assignable-agents";
 import { relativeTime, cn, formatTokens } from "../lib/utils";
 import { InlineEditor } from "../components/InlineEditor";
 import { CommentThread } from "../components/CommentThread";
@@ -290,10 +291,16 @@ export function IssueDetail() {
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   }, [allIssues, issue]);
 
+  const issueProject = projects?.find((project) => project.id === issue?.projectId) ?? null;
+  const issueProjectMemberAgentIds = useMemo(() => {
+    if (!issue?.projectId) return null;
+    if (!projects) return [];
+    return getProjectMemberAgentIds(issueProject?.members ?? []);
+  }, [issue?.projectId, issueProject, projects]);
+
   const commentReassignOptions = useMemo(() => {
     const options: Array<{ id: string; label: string; searchText?: string }> = [];
-    const activeAgents = [...(agents ?? [])]
-      .filter((agent) => agent.status !== "terminated")
+    const activeAgents = filterAssignableAgents(agents, issueProjectMemberAgentIds)
       .sort((a, b) => a.name.localeCompare(b.name));
     for (const agent of activeAgents) {
       options.push({ id: `agent:${agent.id}`, label: agent.name });
@@ -303,7 +310,7 @@ export function IssueDetail() {
       options.push({ id: `user:${currentUserId}`, label });
     }
     return options;
-  }, [agents, currentUserId]);
+  }, [agents, currentUserId, issueProjectMemberAgentIds]);
 
   const currentAssigneeValue = useMemo(() => {
     if (issue?.assigneeAgentId) return `agent:${issue.assigneeAgentId}`;
