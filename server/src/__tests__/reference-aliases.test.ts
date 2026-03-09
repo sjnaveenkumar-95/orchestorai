@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   generateUniqueReferenceAliases,
   readReferenceAliases,
-} from "@paperclipai/shared";
+} from "@orchestorai/shared";
 import {
   applyResolvedReferenceAliases,
   resolveEntityReferenceAliases,

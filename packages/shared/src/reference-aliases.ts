@@ -14,7 +14,7 @@ const NORMALIZE_TRIM_RE = /^-+|-+$/g;
 const PAREN_CONTENT_RE = /\([^)]*\)/g;
 
 const RESERVED_ALIASES: Record<ReferenceEntityKind, Set<string>> = {
-  agent: new Set(["paperclip", "here", "channel", "everyone"]),
+  agent: new Set(["orchestorai", "here", "channel", "everyone"]),
   project: new Set(["project", "proj"]),
 };
 

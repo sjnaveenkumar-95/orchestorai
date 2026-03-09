@@ -1,7 +1,7 @@
 ---
 name: release
 description: >
-  Coordinate a full Paperclip release across engineering, website publishing,
+  Coordinate a full OrchestorAI release across engineering, website publishing,
   and social announcement. Use when CTO/CEO requests "do a release" or
   "release vX.Y.Z". Runs pre-flight checks, generates changelog via
   release-changelog, executes npm release, creates cross-project follow-up
@@ -10,7 +10,7 @@ description: >
 
 # Release Coordination Skill
 
-Run the full Paperclip release process as an organizational workflow, not just
+Run the full OrchestorAI release process as an organizational workflow, not just
 an npm publish.
 
 This skill coordinates:
@@ -42,7 +42,7 @@ Before proceeding, verify all of the following:
 3. App repo working tree is clean.
 4. There are commits since the last release tag.
 5. You have release permissions (`npm whoami` succeeds for real publish).
-6. If running via Paperclip, you have issue context for posting status updates.
+6. If running via OrchestorAI, you have issue context for posting status updates.
 
 If any precondition fails, stop and report the blocker.
 
@@ -52,7 +52,7 @@ If any precondition fails, stop and report the blocker.
 
 Collect these inputs up front:
 
-- Release request source issue (if in Paperclip)
+- Release request source issue (if in OrchestorAI)
 - Requested bump (`patch|minor|major`) or explicit version (`vX.Y.Z`)
 - Whether this run is dry-run or live publish
 - Company/project context for follow-up issue creation
@@ -67,11 +67,11 @@ any step, check whether it has already been completed:
 | Step | How to Check | If Already Done |
 |---|---|---|
 | Changelog | `releases/v{version}.md` exists | Read it, ask reviewer to confirm or update. Do NOT regenerate without asking. |
-| Canary publish | `npm view paperclipai@{version}` succeeds | Skip canary publish. Proceed to smoke test. |
+| Canary publish | `npm view orchestorai@{version}` succeeds | Skip canary publish. Proceed to smoke test. |
 | Smoke test | Manual or scripted verification | If canary already verified, proceed to promote. |
 | Promote | `git tag v{version}` exists | Skip promotion entirely. A tag means the version is already promoted to latest. |
-| Website task | Search Paperclip issues for "Publish release notes for v{version}" | Skip creation. Link the existing task. |
-| CMO task | Search Paperclip issues for "release announcement tweet for v{version}" | Skip creation. Link the existing task. |
+| Website task | Search OrchestorAI issues for "Publish release notes for v{version}" | Skip creation. Link the existing task. |
+| CMO task | Search OrchestorAI issues for "release announcement tweet for v{version}" | Skip creation. Link the existing task. |
 
 **The golden rule:** If a git tag `v{version}` already exists, the release is
 fully promoted. Only post-publish tasks (website, CMO, wrap-up) should proceed.
@@ -145,7 +145,7 @@ on npm:
 
 ```bash
 # Check if canary is already published
-npm view paperclipai@{version} version 2>/dev/null && echo "ALREADY_PUBLISHED" || echo "NOT_PUBLISHED"
+npm view orchestorai@{version} version 2>/dev/null && echo "ALREADY_PUBLISHED" || echo "NOT_PUBLISHED"
 
 # Also check git tag
 git tag -l "v{version}"
@@ -169,13 +169,13 @@ Use `release.sh` with the `--canary` flag (see script changes below):
 ```
 
 This publishes all packages to npm with the `canary` dist-tag. The `latest` tag
-is **not** updated. Users running `npx paperclipai onboard` still get the
+is **not** updated. Users running `npx orchestorai onboard` still get the
 previous stable version.
 
 After publish, verify the canary is accessible:
 
 ```bash
-npm view paperclipai@canary version
+npm view orchestorai@canary version
 # Should show the new version
 ```
 
@@ -195,7 +195,7 @@ npm view paperclipai@canary version
 
 ## Step 4 — Smoke Test the Canary
 
-Run the canary in a clean Docker environment to verify `npx paperclipai onboard`
+Run the canary in a clean Docker environment to verify `npx orchestorai onboard`
 works end-to-end.
 
 ### Automated smoke test
@@ -203,10 +203,10 @@ works end-to-end.
 Use the existing Docker smoke test infrastructure with the canary version:
 
 ```bash
-PAPERCLIPAI_VERSION=canary ./scripts/docker-onboard-smoke.sh
+ORCHESTORAI_VERSION=canary ./scripts/docker-onboard-smoke.sh
 ```
 
-This builds a clean Ubuntu container, installs `paperclipai@canary` via npx, and
+This builds a clean Ubuntu container, installs `orchestorai@canary` via npx, and
 runs the onboarding flow. The UI is accessible at `http://localhost:3131`.
 
 ### What to verify
@@ -239,21 +239,21 @@ Proceed to Step 5 (promote).
 ## Step 5 — Promote Canary to Latest
 
 Once the canary passes smoke testing, promote it to `latest` so that
-`npx paperclipai onboard` picks up the new version.
+`npx orchestorai onboard` picks up the new version.
 
 ### Promote on npm
 
 ```bash
 # For each published package, move the dist-tag from canary to latest
-npm dist-tag add paperclipai@{version} latest
-npm dist-tag add @paperclipai/server@{version} latest
-npm dist-tag add @paperclipai/cli@{version} latest
-npm dist-tag add @paperclipai/shared@{version} latest
-npm dist-tag add @paperclipai/db@{version} latest
-npm dist-tag add @paperclipai/adapter-utils@{version} latest
-npm dist-tag add @paperclipai/adapter-claude-local@{version} latest
-npm dist-tag add @paperclipai/adapter-codex-local@{version} latest
-npm dist-tag add @paperclipai/adapter-openclaw@{version} latest
+npm dist-tag add orchestorai@{version} latest
+npm dist-tag add @orchestorai/server@{version} latest
+npm dist-tag add @orchestorai/cli@{version} latest
+npm dist-tag add @orchestorai/shared@{version} latest
+npm dist-tag add @orchestorai/db@{version} latest
+npm dist-tag add @orchestorai/adapter-utils@{version} latest
+npm dist-tag add @orchestorai/adapter-claude-local@{version} latest
+npm dist-tag add @orchestorai/adapter-codex-local@{version} latest
+npm dist-tag add @orchestorai/adapter-openclaw@{version} latest
 ```
 
 **Script option:** Add `./scripts/release.sh --promote {version}` to automate
@@ -273,11 +273,11 @@ git tag "v{version}"
 ### Verify promotion
 
 ```bash
-npm view paperclipai@latest version
+npm view orchestorai@latest version
 # Should now show the new version
 
 # Final sanity check
-npx --yes paperclipai@latest --version
+npx --yes orchestorai@latest --version
 ```
 
 ---
@@ -294,7 +294,7 @@ GET /api/companies/{companyId}/issues?q=announcement+tweet+v{version}
 If matching tasks already exist (check title contains the version), skip
 creation and link the existing tasks instead. Do not create duplicates.
 
-Create at least two tasks in Paperclip (only if they don't already exist):
+Create at least two tasks in OrchestorAI (only if they don't already exist):
 
 1. Website task: publish changelog for `v{version}`
 2. CMO task: draft announcement tweet for `v{version}`
@@ -378,7 +378,7 @@ updated.
 
 ---
 
-## Paperclip API Notes (When Running in Agent Context)
+## OrchestorAI API Notes (When Running in Agent Context)
 
 Use:
 - `GET /api/companies/{companyId}/projects` to resolve website/workspace project IDs.
@@ -386,8 +386,8 @@ Use:
 - `PATCH /api/issues/{issueId}` with comments for release progress.
 
 For issue-modifying calls, include:
-- `Authorization: Bearer $PAPERCLIP_API_KEY`
-- `X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID`
+- `Authorization: Bearer $ORCHESTORAI_API_KEY`
+- `X-OrchestorAI-Run-Id: $ORCHESTORAI_RUN_ID`
 
 ---
 

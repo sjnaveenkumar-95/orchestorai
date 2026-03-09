@@ -1,4 +1,4 @@
-import type { TranscriptEntry } from "@paperclipai/adapter-utils";
+import type { TranscriptEntry } from "@orchestorai/adapter-utils";
 import { normalizeOpenClawStreamLine } from "../shared/stream.js";
 
 function safeJsonParse(text: string): unknown {

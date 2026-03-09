@@ -20,10 +20,10 @@ function makeFingerprintKey(issueId, fingerprint) {
   return `${String(issueId || "").trim()}:${String(fingerprint || "").trim()}`;
 }
 
-export class PaperclipThreadStore {
+export class OrchestorAIThreadStore {
   constructor(dataDir) {
     this.dataDir = dataDir;
-    this.filePath = path.join(dataDir, "paperclip-thread-store.json");
+    this.filePath = path.join(dataDir, "orchestorai-thread-store.json");
     this.state = {
       mappings: {},
       issueIndex: {},

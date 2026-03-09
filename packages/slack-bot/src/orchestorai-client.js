@@ -24,7 +24,7 @@ async function toMessageData(raw) {
   return String(raw || "");
 }
 
-export class PaperclipClient {
+export class OrchestorAIClient {
   constructor(params) {
     this.apiUrl = trimTrailingSlash(params.apiUrl);
     this.companyId = String(params.companyId || "").trim();
@@ -231,12 +231,12 @@ export class PaperclipClient {
             await handlers.onEvent(parsed);
           }
         } catch (err) {
-          this.log("warn", `paperclip live event parse failed: ${String(err)}`);
+          this.log("warn", `orchestorai live event parse failed: ${String(err)}`);
         }
       });
 
       socket.addEventListener("error", (event) => {
-        const message = event?.message || event?.error?.message || "paperclip websocket error";
+        const message = event?.message || event?.error?.message || "orchestorai websocket error";
         if (typeof handlers.onError === "function") {
           handlers.onError(new Error(String(message)));
         }

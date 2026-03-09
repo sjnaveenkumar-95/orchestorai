@@ -5,7 +5,7 @@ import {
   buildProjectSlackChannelName,
   normalizeSlackChannelName,
   type Project,
-} from "@paperclipai/shared";
+} from "@orchestorai/shared";
 import { StatusBadge } from "./StatusBadge";
 import { cn, formatDate } from "../lib/utils";
 import { goalsApi } from "../api/goals";
@@ -35,7 +35,7 @@ interface ProjectPropertiesProps {
   onUpdate?: (data: Record<string, unknown>) => void;
 }
 
-const REPO_ONLY_CWD_SENTINEL = "/__paperclip_repo_only__";
+const REPO_ONLY_CWD_SENTINEL = "/__orchestorai_repo_only__";
 
 function PropertyRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (

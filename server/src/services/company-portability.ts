@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { Db } from "@paperclipai/db";
+import type { Db } from "@orchestorai/db";
 import type {
   CompanyPortabilityAgentManifestEntry,
   CompanyPortabilityCollisionStrategy,
@@ -13,8 +13,8 @@ import type {
   CompanyPortabilityPreview,
   CompanyPortabilityPreviewAgentPlan,
   CompanyPortabilityPreviewResult,
-} from "@paperclipai/shared";
-import { normalizeAgentUrlKey, portabilityManifestSchema } from "@paperclipai/shared";
+} from "@orchestorai/shared";
+import { normalizeAgentUrlKey, portabilityManifestSchema } from "@orchestorai/shared";
 import { notFound, unprocessable } from "../errors.js";
 import { accessService } from "./access.js";
 import { agentService } from "./agents.js";
@@ -421,7 +421,7 @@ async function readAgentInstructions(agent: AgentLike): Promise<{ body: string; 
   const config = agent.adapterConfig as Record<string, unknown>;
   const instructionsFilePath = asString(config.instructionsFilePath);
   if (instructionsFilePath) {
-    const workspaceCwd = asString(process.env.PAPERCLIP_WORKSPACE_CWD);
+    const workspaceCwd = asString(process.env.ORCHESTORAI_WORKSPACE_CWD);
     const candidates = new Set<string>();
     if (path.isAbsolute(instructionsFilePath)) {
       candidates.add(instructionsFilePath);
@@ -497,7 +497,7 @@ export function companyPortabilityService(db: Db) {
 
     const parsed = parseGitHubTreeUrl(source.url);
     let ref = parsed.ref;
-    const manifestRelativePath = [parsed.basePath, "paperclip.manifest.json"].filter(Boolean).join("/");
+    const manifestRelativePath = [parsed.basePath, "orchestorai.manifest.json"].filter(Boolean).join("/");
     let manifest: CompanyPortabilityManifest | null = null;
     const warnings: string[] = [];
     try {

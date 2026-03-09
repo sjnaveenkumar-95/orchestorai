@@ -1,5 +1,5 @@
 import { Router, type Request } from "express";
-import type { Db } from "@paperclipai/db";
+import type { Db } from "@orchestorai/db";
 import {
   createProjectSchema,
   createProjectMemberSchema,
@@ -7,7 +7,7 @@ import {
   isUuidLike,
   updateProjectSchema,
   updateProjectWorkspaceSchema,
-} from "@paperclipai/shared";
+} from "@orchestorai/shared";
 import { validate } from "../middleware/validate.js";
 import { projectService, slackIntegrationService, logActivity } from "../services/index.js";
 import { conflict } from "../errors.js";

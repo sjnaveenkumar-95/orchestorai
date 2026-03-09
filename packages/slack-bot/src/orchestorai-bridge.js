@@ -144,7 +144,7 @@ function looksLikeSummaryVerb(text) {
   );
 }
 
-export function detectPaperclipSummaryRequest({ text, mappedIssueIdentifier = "" }) {
+export function detectOrchestorAISummaryRequest({ text, mappedIssueIdentifier = "" }) {
   const source = collapseWhitespace(stripSlackMentions(String(text || "")));
   if (!source) {
     return null;
@@ -177,7 +177,7 @@ export function detectPaperclipSummaryRequest({ text, mappedIssueIdentifier = ""
   }
 
   const overviewIntent =
-    /\b(tickets|issues|dashboard|board)\b/i.test(normalized) || /\bpaperclip\b/i.test(normalized);
+    /\b(tickets|issues|dashboard|board)\b/i.test(normalized) || /\borchestorai\b/i.test(normalized);
   if (!overviewIntent) {
     return null;
   }
@@ -189,7 +189,7 @@ export function detectPaperclipSummaryRequest({ text, mappedIssueIdentifier = ""
   };
 }
 
-export function detectPaperclipCommentRequest({ text, mappedIssueIdentifier = "" }) {
+export function detectOrchestorAICommentRequest({ text, mappedIssueIdentifier = "" }) {
   const source = collapseWhitespace(stripSlackMentions(String(text || "")));
   if (!source) {
     return null;
@@ -377,7 +377,7 @@ function stripLeadingTriggerMentions(text, triggerMentions) {
   return remaining;
 }
 
-export function hasPaperclipTrigger({ text, botUserId, triggerMentions }) {
+export function hasOrchestorAITrigger({ text, botUserId, triggerMentions }) {
   const source = String(text || "");
   if (!source) {
     return false;
@@ -394,7 +394,7 @@ export function hasPaperclipTrigger({ text, botUserId, triggerMentions }) {
   return normalizedTriggers.some((trigger) => plainMentions.includes(trigger));
 }
 
-export function stripPaperclipTrigger(text, triggerMentions) {
+export function stripOrchestorAITrigger(text, triggerMentions) {
   return collapseWhitespace(stripLeadingTriggerMentions(String(text || ""), triggerMentions));
 }
 
@@ -774,7 +774,7 @@ export function summarizeIssueUpdate(details) {
 }
 
 export function formatActivityNotification({ action, identifier, details, actorName }) {
-  const issueRef = identifier ? `Paperclip ${identifier}` : "Paperclip issue";
+  const issueRef = identifier ? `OrchestorAI ${identifier}` : "OrchestorAI issue";
   if (action === "issue.comment_added") {
     const snippet = String(details?.bodySnippet || "").trim();
     const prefix = actorName ? `${actorName} commented on ${issueRef}` : `Comment on ${issueRef}`;
@@ -794,7 +794,7 @@ export function formatActivityNotification({ action, identifier, details, actorN
 }
 
 export function formatRunNotification({ eventType, status, identifier, agentName, error }) {
-  const issueRef = identifier ? `Paperclip ${identifier}` : "Paperclip issue";
+  const issueRef = identifier ? `OrchestorAI ${identifier}` : "OrchestorAI issue";
   if (eventType === "heartbeat.run.queued") {
     return agentName ? `Run queued for ${agentName} on ${issueRef}.` : `Run queued on ${issueRef}.`;
   }
@@ -831,8 +831,8 @@ export function formatChildIssueThreadRootMessage({
 }) {
   const lines = [
     parentIdentifier
-      ? `Created Paperclip issue ${childIdentifier} from ${parentIdentifier}.`
-      : `Created Paperclip issue ${childIdentifier}.`,
+      ? `Created OrchestorAI issue ${childIdentifier} from ${parentIdentifier}.`
+      : `Created OrchestorAI issue ${childIdentifier}.`,
     `This thread will track ${childIdentifier}.`,
   ];
 
@@ -854,7 +854,7 @@ export function formatChildIssueParentNotice({ childIdentifier, parentIdentifier
     return "";
   }
   if (!parentIdentifier) {
-    return `Paperclip ${childIdentifier} was created and moved to a new Slack thread.`;
+    return `OrchestorAI ${childIdentifier} was created and moved to a new Slack thread.`;
   }
-  return `Paperclip ${childIdentifier} was created from ${parentIdentifier}. I opened a new Slack thread for ${childIdentifier}.`;
+  return `OrchestorAI ${childIdentifier} was created from ${parentIdentifier}. I opened a new Slack thread for ${childIdentifier}.`;
 }

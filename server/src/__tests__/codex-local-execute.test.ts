@@ -2,30 +2,30 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { execute } from "@paperclipai/adapter-codex-local/server";
+import { execute } from "@orchestorai/adapter-codex-local/server";
 
 async function writeFakeCodexCommand(commandPath: string): Promise<void> {
   const script = `#!/usr/bin/env node
 const fs = require("node:fs");
 
-const capturePath = process.env.PAPERCLIP_TEST_CAPTURE_PATH;
+const capturePath = process.env.ORCHESTORAI_TEST_CAPTURE_PATH;
 const payload = {
   argv: process.argv.slice(2),
   prompt: fs.readFileSync(0, "utf8"),
   env: {
     AGENT_HOME: process.env.AGENT_HOME || "",
-    PAPERCLIP_AGENT_HOME: process.env.PAPERCLIP_AGENT_HOME || "",
-    PAPERCLIP_AGENT_ID: process.env.PAPERCLIP_AGENT_ID || "",
-    PAPERCLIP_API_KEY: process.env.PAPERCLIP_API_KEY || "",
-    PAPERCLIP_COMPANY_ID: process.env.PAPERCLIP_COMPANY_ID || "",
-    PAPERCLIP_RUN_ID: process.env.PAPERCLIP_RUN_ID || "",
-    PAPERCLIP_TASK_ID: process.env.PAPERCLIP_TASK_ID || "",
-    PAPERCLIP_WAKE_REASON: process.env.PAPERCLIP_WAKE_REASON || "",
-    PAPERCLIP_WAKE_COMMENT_ID: process.env.PAPERCLIP_WAKE_COMMENT_ID || "",
-    PAPERCLIP_LINKED_ISSUE_IDS: process.env.PAPERCLIP_LINKED_ISSUE_IDS || "",
-    PAPERCLIP_WORKSPACE_CWD: process.env.PAPERCLIP_WORKSPACE_CWD || "",
-    PAPERCLIP_WORKSPACE_REPO_URL: process.env.PAPERCLIP_WORKSPACE_REPO_URL || "",
-    PAPERCLIP_WORKSPACE_REPO_REF: process.env.PAPERCLIP_WORKSPACE_REPO_REF || "",
+    ORCHESTORAI_AGENT_HOME: process.env.ORCHESTORAI_AGENT_HOME || "",
+    ORCHESTORAI_AGENT_ID: process.env.ORCHESTORAI_AGENT_ID || "",
+    ORCHESTORAI_API_KEY: process.env.ORCHESTORAI_API_KEY || "",
+    ORCHESTORAI_COMPANY_ID: process.env.ORCHESTORAI_COMPANY_ID || "",
+    ORCHESTORAI_RUN_ID: process.env.ORCHESTORAI_RUN_ID || "",
+    ORCHESTORAI_TASK_ID: process.env.ORCHESTORAI_TASK_ID || "",
+    ORCHESTORAI_WAKE_REASON: process.env.ORCHESTORAI_WAKE_REASON || "",
+    ORCHESTORAI_WAKE_COMMENT_ID: process.env.ORCHESTORAI_WAKE_COMMENT_ID || "",
+    ORCHESTORAI_LINKED_ISSUE_IDS: process.env.ORCHESTORAI_LINKED_ISSUE_IDS || "",
+    ORCHESTORAI_WORKSPACE_CWD: process.env.ORCHESTORAI_WORKSPACE_CWD || "",
+    ORCHESTORAI_WORKSPACE_REPO_URL: process.env.ORCHESTORAI_WORKSPACE_REPO_URL || "",
+    ORCHESTORAI_WORKSPACE_REPO_REF: process.env.ORCHESTORAI_WORKSPACE_REPO_REF || "",
   },
 };
 if (capturePath) {
@@ -46,9 +46,9 @@ async function writeAgentHome(agentHome: string, agentName: string): Promise<str
     `You are ${agentName}. Read HEARTBEAT.md, SOUL.md, and TOOLS.md.`,
     "utf8",
   );
-  await fs.writeFile(path.join(agentHome, "HEARTBEAT.md"), "# HEARTBEAT\nUse Paperclip.", "utf8");
+  await fs.writeFile(path.join(agentHome, "HEARTBEAT.md"), "# HEARTBEAT\nUse OrchestorAI.", "utf8");
   await fs.writeFile(path.join(agentHome, "SOUL.md"), "# SOUL\nDeliver work.", "utf8");
-  await fs.writeFile(path.join(agentHome, "TOOLS.md"), "# TOOLS\nUse Paperclip APIs.", "utf8");
+  await fs.writeFile(path.join(agentHome, "TOOLS.md"), "# TOOLS\nUse OrchestorAI APIs.", "utf8");
   return path.join(agentHome, "AGENTS.md");
 }
 
@@ -60,7 +60,7 @@ type CapturePayload = {
 
 describe("codex_local execute", () => {
   it("prepends an execution-first heartbeat brief for assigned issue wakes", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-execute-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "orchestorai-codex-execute-"));
     const workspace = path.join(root, "workspace");
     const agentHome = path.join(root, "agents", "nick-sde-3");
     const commandPath = path.join(root, "codex");
@@ -97,16 +97,16 @@ describe("codex_local execute", () => {
           model: "gpt-5.3-codex",
           instructionsFilePath,
           env: {
-            PAPERCLIP_TEST_CAPTURE_PATH: capturePath,
+            ORCHESTORAI_TEST_CAPTURE_PATH: capturePath,
           },
-          promptTemplate: "Follow the paperclip heartbeat.",
+          promptTemplate: "Follow the orchestorai heartbeat.",
         },
         context: {
           taskId: "issue-123",
           wakeReason: "issue_assigned",
           wakeCommentId: "comment-456",
           issueIds: ["issue-123", "issue-999"],
-          paperclipWorkspace: {
+          orchestoraiWorkspace: {
             cwd: workspace,
             source: "project_workspace",
             workspaceId: "workspace-1",
@@ -125,7 +125,7 @@ describe("codex_local execute", () => {
       expect(result.errorMessage).toBeNull();
 
       const capture = JSON.parse(await fs.readFile(capturePath, "utf8")) as CapturePayload;
-      expect(capture.prompt).toContain("Paperclip heartbeat directive:");
+      expect(capture.prompt).toContain("OrchestorAI heartbeat directive:");
       expect(capture.prompt).toContain(`Effective agent home: ${agentHome}`);
       expect(capture.prompt).toContain("Wake reason: issue_assigned");
       expect(capture.prompt).toContain("Task / issue ID: issue-123");
@@ -134,20 +134,20 @@ describe("codex_local execute", () => {
       expect(capture.prompt).toContain("Workspace repo URL: https://example.com/repo.git");
       expect(capture.prompt).toContain("Because wake reason is issue_assigned, this run must not end as bootstrap-only output.");
       expect(capture.prompt).toContain("Never end with phrases such as 'ready for the concrete assignment'");
-      expect(capture.prompt).toContain("Do not ask the user for the task again when the task is already present in Paperclip issue/context.");
-      expect(capture.prompt).toContain(`Use PAPERCLIP_AGENT_HOME=${agentHome} as the effective agent home for this run.`);
+      expect(capture.prompt).toContain("Do not ask the user for the task again when the task is already present in OrchestorAI issue/context.");
+      expect(capture.prompt).toContain(`Use ORCHESTORAI_AGENT_HOME=${agentHome} as the effective agent home for this run.`);
       expect(capture.prompt).toContain("The above agent instructions were loaded from");
       expect(capture.prompt).toContain("Resolve any relative file references from");
-      expect(capture.prompt).toContain("Follow the paperclip heartbeat.");
-      expect(invocationPrompt).toContain("Paperclip heartbeat directive:");
-      expect(capture.env.PAPERCLIP_AGENT_HOME).toBe(agentHome);
-      expect(capture.env.PAPERCLIP_TASK_ID).toBe("issue-123");
-      expect(capture.env.PAPERCLIP_WAKE_REASON).toBe("issue_assigned");
-      expect(capture.env.PAPERCLIP_WAKE_COMMENT_ID).toBe("comment-456");
-      expect(capture.env.PAPERCLIP_LINKED_ISSUE_IDS).toBe("issue-123,issue-999");
-      expect(capture.env.PAPERCLIP_WORKSPACE_CWD).toBe(workspace);
-      expect(capture.env.PAPERCLIP_WORKSPACE_REPO_URL).toBe("https://example.com/repo.git");
-      expect(capture.env.PAPERCLIP_WORKSPACE_REPO_REF).toBe("main");
+      expect(capture.prompt).toContain("Follow the orchestorai heartbeat.");
+      expect(invocationPrompt).toContain("OrchestorAI heartbeat directive:");
+      expect(capture.env.ORCHESTORAI_AGENT_HOME).toBe(agentHome);
+      expect(capture.env.ORCHESTORAI_TASK_ID).toBe("issue-123");
+      expect(capture.env.ORCHESTORAI_WAKE_REASON).toBe("issue_assigned");
+      expect(capture.env.ORCHESTORAI_WAKE_COMMENT_ID).toBe("comment-456");
+      expect(capture.env.ORCHESTORAI_LINKED_ISSUE_IDS).toBe("issue-123,issue-999");
+      expect(capture.env.ORCHESTORAI_WORKSPACE_CWD).toBe(workspace);
+      expect(capture.env.ORCHESTORAI_WORKSPACE_REPO_URL).toBe("https://example.com/repo.git");
+      expect(capture.env.ORCHESTORAI_WORKSPACE_REPO_REF).toBe("main");
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;
@@ -164,7 +164,7 @@ describe("codex_local execute", () => {
   });
 
   it("exports AGENT_HOME from instructions file context and preserves the instructions prefix", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-agent-home-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "orchestorai-codex-agent-home-"));
     const workspace = path.join(root, "workspace");
     const agentHome = path.join(root, "agents", "cto");
     const commandPath = path.join(root, "codex");
@@ -201,9 +201,9 @@ describe("codex_local execute", () => {
           cwd: workspace,
           instructionsFilePath,
           env: {
-            PAPERCLIP_TEST_CAPTURE_PATH: capturePath,
+            ORCHESTORAI_TEST_CAPTURE_PATH: capturePath,
           },
-          promptTemplate: "Coordinate the current Paperclip heartbeat.",
+          promptTemplate: "Coordinate the current OrchestorAI heartbeat.",
         },
         context: {
           wakeReason: "heartbeat_timer",
@@ -217,12 +217,12 @@ describe("codex_local execute", () => {
 
       const capture = JSON.parse(await fs.readFile(capturePath, "utf8")) as CapturePayload;
       expect(capture.env.AGENT_HOME).toBe(agentHome);
-      expect(capture.env.PAPERCLIP_AGENT_HOME).toBe(agentHome);
-      expect(capture.prompt).toContain("Paperclip heartbeat directive:");
+      expect(capture.env.ORCHESTORAI_AGENT_HOME).toBe(agentHome);
+      expect(capture.prompt).toContain("OrchestorAI heartbeat directive:");
       expect(capture.prompt).toContain(`Effective agent home: ${agentHome}`);
       expect(capture.prompt).toContain("Wake reason: heartbeat_timer");
       expect(capture.prompt).toContain("If no direct task context is provided, run the normal heartbeat workflow");
-      expect(capture.prompt).toContain(`Use PAPERCLIP_AGENT_HOME=${agentHome} as the effective agent home for this run.`);
+      expect(capture.prompt).toContain(`Use ORCHESTORAI_AGENT_HOME=${agentHome} as the effective agent home for this run.`);
       expect(capture.prompt).toContain("You are CTO. Read HEARTBEAT.md, SOUL.md, and TOOLS.md.");
       expect(capture.prompt).toContain(`The above agent instructions were loaded from ${instructionsFilePath}.`);
       expect(capture.prompt).toContain(`Resolve any relative file references from ${agentHome}/.`);

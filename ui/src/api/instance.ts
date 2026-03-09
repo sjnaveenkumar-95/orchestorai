@@ -1,7 +1,7 @@
 import type {
   InstanceRuntimeSettings,
   UpdateInstanceRuntimeSettings
-} from "@paperclipai/shared";
+} from "@orchestorai/shared";
 import { api } from "./client";
 
 export const instanceApi = {

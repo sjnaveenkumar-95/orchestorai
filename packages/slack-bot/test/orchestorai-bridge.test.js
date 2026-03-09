@@ -5,20 +5,20 @@ import os from "node:os";
 import path from "node:path";
 
 import {
-  detectPaperclipCommentRequest,
-  detectPaperclipSummaryRequest,
+  detectOrchestorAICommentRequest,
+  detectOrchestorAISummaryRequest,
   detectTaskRequest,
   extractIssueIdentifiers,
   extractProjectSelectors,
   fingerprintIssueComment,
   formatChildIssueParentNotice,
   formatChildIssueThreadRootMessage,
-  hasPaperclipTrigger,
+  hasOrchestorAITrigger,
   resolveAssignee,
   resolveProject,
   stripBotMention,
-} from "../src/paperclip-bridge.js";
-import { PaperclipThreadStore } from "../src/paperclip-thread-store.js";
+} from "../src/orchestorai-bridge.js";
+import { OrchestorAIThreadStore } from "../src/orchestorai-thread-store.js";
 
 test("detectTaskRequest accepts bot mention before task prefix", () => {
   const task = detectTaskRequest({
@@ -33,9 +33,9 @@ test("detectTaskRequest accepts bot mention before task prefix", () => {
 
 test("detectTaskRequest accepts configured trigger mention before task prefix", () => {
   const task = detectTaskRequest({
-    text: "@paperclip task: Fix the failing deploy\nMore detail here",
+    text: "@orchestorai task: Fix the failing deploy\nMore detail here",
     taskPrefix: "task:",
-    triggerMentions: ["@paperclip"],
+    triggerMentions: ["@orchestorai"],
   });
 
   assert.ok(task);
@@ -43,15 +43,15 @@ test("detectTaskRequest accepts configured trigger mention before task prefix", 
   assert.equal(task.body, "Fix the failing deploy\nMore detail here");
 });
 
-test("extractIssueIdentifiers reads Paperclip issue identifiers from text", () => {
+test("extractIssueIdentifiers reads OrchestorAI issue identifiers from text", () => {
   const identifiers = extractIssueIdentifiers("Can you summarize AND-9 and pap-14?");
 
   assert.deepEqual(identifiers, ["AND-9", "PAP-14"]);
 });
 
-test("detectPaperclipSummaryRequest matches overview requests", () => {
-  const request = detectPaperclipSummaryRequest({
-    text: "Can you give me a summary of tickets in Paperclip?",
+test("detectOrchestorAISummaryRequest matches overview requests", () => {
+  const request = detectOrchestorAISummaryRequest({
+    text: "Can you give me a summary of tickets in OrchestorAI?",
   });
 
   assert.deepEqual(request, {
@@ -61,8 +61,8 @@ test("detectPaperclipSummaryRequest matches overview requests", () => {
   });
 });
 
-test("detectPaperclipSummaryRequest matches explicit issue summaries", () => {
-  const request = detectPaperclipSummaryRequest({
+test("detectOrchestorAISummaryRequest matches explicit issue summaries", () => {
+  const request = detectOrchestorAISummaryRequest({
     text: "Please summarize AND-9 for me",
   });
 
@@ -73,8 +73,8 @@ test("detectPaperclipSummaryRequest matches explicit issue summaries", () => {
   });
 });
 
-test("detectPaperclipSummaryRequest uses mapped thread issue for 'this ticket'", () => {
-  const request = detectPaperclipSummaryRequest({
+test("detectOrchestorAISummaryRequest uses mapped thread issue for 'this ticket'", () => {
+  const request = detectOrchestorAISummaryRequest({
     text: "What is the status of this ticket?",
     mappedIssueIdentifier: "and-8",
   });
@@ -86,8 +86,8 @@ test("detectPaperclipSummaryRequest uses mapped thread issue for 'this ticket'",
   });
 });
 
-test("detectPaperclipCommentRequest matches latest comment lookup by identifier", () => {
-  const request = detectPaperclipCommentRequest({
+test("detectOrchestorAICommentRequest matches latest comment lookup by identifier", () => {
+  const request = detectOrchestorAICommentRequest({
     text: "Get me the recent comment from AND-12 ticket",
   });
 
@@ -98,8 +98,8 @@ test("detectPaperclipCommentRequest matches latest comment lookup by identifier"
   });
 });
 
-test("detectPaperclipCommentRequest uses mapped thread issue for current ticket comments", () => {
-  const request = detectPaperclipCommentRequest({
+test("detectOrchestorAICommentRequest uses mapped thread issue for current ticket comments", () => {
+  const request = detectOrchestorAICommentRequest({
     text: "What is the latest comment on this ticket?",
     mappedIssueIdentifier: "and-9",
   });
@@ -113,9 +113,9 @@ test("detectPaperclipCommentRequest uses mapped thread issue for current ticket 
 
 test("detectTaskRequest accepts a title line before the trigger line", () => {
   const task = detectTaskRequest({
-    text: "Eyalty - Verify email verification flow\n@paperclip task: Check the kill and restart flow\nInclude Business and Consumer variants",
+    text: "Eyalty - Verify email verification flow\n@orchestorai task: Check the kill and restart flow\nInclude Business and Consumer variants",
     taskPrefix: "task:",
-    triggerMentions: ["@paperclip"],
+    triggerMentions: ["@orchestorai"],
   });
 
   assert.ok(task);
@@ -123,30 +123,30 @@ test("detectTaskRequest accepts a title line before the trigger line", () => {
   assert.equal(task.body, "Check the kill and restart flow\nInclude Business and Consumer variants");
 });
 
-test("hasPaperclipTrigger matches bot mention and configured aliases", () => {
+test("hasOrchestorAITrigger matches bot mention and configured aliases", () => {
   assert.equal(
-    hasPaperclipTrigger({
+    hasOrchestorAITrigger({
       text: "<@BOT1> task: Fix the deploy",
       botUserId: "BOT1",
-      triggerMentions: ["@paperclip"],
+      triggerMentions: ["@orchestorai"],
     }),
     true,
   );
 
   assert.equal(
-    hasPaperclipTrigger({
-      text: "task: Fix the deploy\n@paperclip please create this",
+    hasOrchestorAITrigger({
+      text: "task: Fix the deploy\n@orchestorai please create this",
       botUserId: "BOT1",
-      triggerMentions: ["@paperclip"],
+      triggerMentions: ["@orchestorai"],
     }),
     true,
   );
 
   assert.equal(
-    hasPaperclipTrigger({
+    hasOrchestorAITrigger({
       text: "task: Fix the deploy",
       botUserId: "BOT1",
-      triggerMentions: ["@paperclip"],
+      triggerMentions: ["@orchestorai"],
     }),
     false,
   );
@@ -170,7 +170,7 @@ test("resolveAssignee prefers configured Slack mapping", () => {
   assert.equal(result.source, "mapping");
 });
 
-test("resolveAssignee falls back to exact Paperclip agent name", () => {
+test("resolveAssignee falls back to exact OrchestorAI agent name", () => {
   const result = resolveAssignee({
     text: "task: @BackendEngineer fix the webhook retry bug",
     agentMappings: {},
@@ -234,7 +234,7 @@ test("extractProjectSelectors reads project metadata lines", () => {
 
 test("extractProjectSelectors reads inline hashtag project selectors", () => {
   const selectors = extractProjectSelectors(
-    "@paperclip task: Check email flow #project eyalty. @qa please verify.",
+    "@orchestorai task: Check email flow #project eyalty. @qa please verify.",
   );
 
   assert.deepEqual(selectors, ["eyalty"]);
@@ -258,7 +258,7 @@ test("resolveProject prefers configured project alias mapping", () => {
   assert.equal(result.source, "mapping");
 });
 
-test("resolveProject falls back to exact Paperclip project name", () => {
+test("resolveProject falls back to exact OrchestorAI project name", () => {
   const result = resolveProject({
     text: "task: Fix onboarding\nproject: AI Auto Expense Tracker",
     projectMappings: {},
@@ -322,8 +322,8 @@ test("stripBotMention only removes the bot mention", () => {
   assert.equal(result, "please sync this for <@U123>");
 });
 
-test("stripBotMention removes configured paperclip aliases", () => {
-  const result = stripBotMention("@paperclip please sync this for <@U123>", "BOT1", ["@paperclip"]);
+test("stripBotMention removes configured orchestorai aliases", () => {
+  const result = stripBotMention("@orchestorai please sync this for <@U123>", "BOT1", ["@orchestorai"]);
   assert.equal(result, "please sync this for <@U123>");
 });
 
@@ -339,7 +339,7 @@ test("formatChildIssueThreadRootMessage includes parent, assignee, and project c
   assert.equal(
     message,
     [
-      "Created Paperclip issue AND-9 from AND-8.",
+      "Created OrchestorAI issue AND-9 from AND-8.",
       "This thread will track AND-9.",
       "Title: Implement OTP/email verification gate on app restart",
       "Assignee: CTO",
@@ -356,14 +356,14 @@ test("formatChildIssueParentNotice explains that a new Slack thread was opened",
 
   assert.equal(
     message,
-    "Paperclip AND-9 was created from AND-8. I opened a new Slack thread for AND-9.",
+    "OrchestorAI AND-9 was created from AND-8. I opened a new Slack thread for AND-9.",
   );
 });
 
-test("paperclip thread store persists mappings and fingerprints", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-thread-store-"));
+test("orchestorai thread store persists mappings and fingerprints", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "orchestorai-thread-store-"));
   try {
-    const store = new PaperclipThreadStore(tmpDir);
+    const store = new OrchestorAIThreadStore(tmpDir);
     store.ensureLoaded();
 
     store.putMapping({
@@ -387,10 +387,10 @@ test("paperclip thread store persists mappings and fingerprints", () => {
   }
 });
 
-test("paperclip thread store remembers preferred company channels and can infer from mappings", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-thread-store-pref-"));
+test("orchestorai thread store remembers preferred company channels and can infer from mappings", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "orchestorai-thread-store-pref-"));
   try {
-    const store = new PaperclipThreadStore(tmpDir);
+    const store = new OrchestorAIThreadStore(tmpDir);
     store.ensureLoaded();
 
     store.putMapping({

@@ -5,8 +5,8 @@ export interface BridgeConfig {
   port: number;
   slackSigningSecret: string;
   slackBotToken: string;
-  paperclipApiUrl: string;
-  paperclipApiToken: string | null;
+  orchestoraiApiUrl: string;
+  orchestoraiApiToken: string | null;
   defaultCompanyId: string | null;
   outboundToken: string | null;
   stateFile: string;
@@ -40,12 +40,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
     port: parsePort(env.PORT),
     slackSigningSecret: requireNonEmpty(env, "SLACK_SIGNING_SECRET"),
     slackBotToken: requireNonEmpty(env, "SLACK_BOT_TOKEN"),
-    paperclipApiUrl: requireNonEmpty(env, "PAPERCLIP_API_URL").replace(/\/+$/, ""),
-    paperclipApiToken: optionalNonEmpty(env, "PAPERCLIP_API_TOKEN"),
-    defaultCompanyId: optionalNonEmpty(env, "PAPERCLIP_DEFAULT_COMPANY_ID"),
+    orchestoraiApiUrl: requireNonEmpty(env, "ORCHESTORAI_API_URL").replace(/\/+$/, ""),
+    orchestoraiApiToken: optionalNonEmpty(env, "ORCHESTORAI_API_TOKEN"),
+    defaultCompanyId: optionalNonEmpty(env, "ORCHESTORAI_DEFAULT_COMPANY_ID"),
     outboundToken: optionalNonEmpty(env, "SLACK_BRIDGE_OUTBOUND_TOKEN"),
     stateFile: configuredStateFile
       ? path.resolve(configuredStateFile)
-      : path.resolve(process.cwd(), ".paperclip/slack-bridge-state.json"),
+      : path.resolve(process.cwd(), ".orchestorai/slack-bridge-state.json"),
   };
 }

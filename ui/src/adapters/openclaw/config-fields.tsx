@@ -106,19 +106,19 @@ export function OpenClawConfigFields({
       </Field>
       {!isCreate && (
         <>
-          <Field label="Paperclip API URL override">
+          <Field label="OrchestorAI API URL override">
             <DraftInput
               value={
                 eff(
                   "adapterConfig",
-                  "paperclipApiUrl",
-                  String(config.paperclipApiUrl ?? ""),
+                  "orchestoraiApiUrl",
+                  String(config.orchestoraiApiUrl ?? ""),
                 )
               }
-              onCommit={(v) => mark("adapterConfig", "paperclipApiUrl", v || undefined)}
+              onCommit={(v) => mark("adapterConfig", "orchestoraiApiUrl", v || undefined)}
               immediate
               className={inputClass}
-              placeholder="https://paperclip.example"
+              placeholder="https://orchestorai.example"
             />
           </Field>
 
@@ -148,11 +148,11 @@ export function OpenClawConfigFields({
           {sessionStrategy === "fixed" && (
             <Field label="Session key">
               <DraftInput
-                value={eff("adapterConfig", "sessionKey", String(config.sessionKey ?? "paperclip"))}
+                value={eff("adapterConfig", "sessionKey", String(config.sessionKey ?? "orchestorai"))}
                 onCommit={(v) => mark("adapterConfig", "sessionKey", v || undefined)}
                 immediate
                 className={inputClass}
-                placeholder="paperclip"
+                placeholder="orchestorai"
               />
             </Field>
           )}

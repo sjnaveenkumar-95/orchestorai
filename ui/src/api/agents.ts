@@ -8,8 +8,8 @@ import type {
   Approval,
   AgentConfigRevision,
   AgentSlackApp,
-} from "@paperclipai/shared";
-import { isUuidLike, normalizeAgentUrlKey } from "@paperclipai/shared";
+} from "@orchestorai/shared";
+import { isUuidLike, normalizeAgentUrlKey } from "@orchestorai/shared";
 import { ApiError, api } from "./client";
 
 export interface AgentKey {

@@ -1,6 +1,6 @@
 import { Router, type Request } from "express";
-import type { Db } from "@paperclipai/db";
-import { updateInstanceRuntimeSettingsSchema } from "@paperclipai/shared";
+import type { Db } from "@orchestorai/db";
+import { updateInstanceRuntimeSettingsSchema } from "@orchestorai/shared";
 import { forbidden, unauthorized } from "../errors.js";
 import { validate } from "../middleware/validate.js";
 import { accessService } from "../services/index.js";

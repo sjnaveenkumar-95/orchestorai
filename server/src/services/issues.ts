@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
-import type { Db } from "@paperclipai/db";
+import type { Db } from "@orchestorai/db";
 import {
   agents,
   assets,
@@ -16,8 +16,8 @@ import {
   projectMembers,
   projectWorkspaces,
   projects,
-} from "@paperclipai/db";
-import { deriveProjectIssuePrefixBase, extractProjectMentionIds } from "@paperclipai/shared";
+} from "@orchestorai/db";
+import { deriveProjectIssuePrefixBase, extractProjectMentionIds } from "@orchestorai/shared";
 import { conflict, notFound, unprocessable } from "../errors.js";
 
 const ALL_ISSUE_STATUSES = ["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"];

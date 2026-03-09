@@ -69,7 +69,7 @@ export function parseCommandText(input: string): ParsedCommand {
 
 export function helpText(): string {
   return [
-    "Paperclip Slack bridge commands:",
+    "OrchestorAI Slack bridge commands:",
     "- create <title>",
     "- create <title> :: <description>",
     "- create <title> --company <company-id>",
@@ -79,6 +79,6 @@ export function helpText(): string {
     "",
     "Shortcuts:",
     "- root-channel mention with free text creates an issue",
-    "- mentioning the bot in a linked thread adds a Paperclip comment",
+    "- mentioning the bot in a linked thread adds a OrchestorAI comment",
   ].join("\n");
 }

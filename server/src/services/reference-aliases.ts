@@ -5,7 +5,7 @@ import {
   removeReferenceAliasesMetadata,
   type ReferenceAliases,
   type ReferenceEntityKind,
-} from "@paperclipai/shared";
+} from "@orchestorai/shared";
 
 interface ReferenceRow {
   id: string;

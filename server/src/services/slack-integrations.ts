@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
-import type { Db } from "@paperclipai/db";
+import type { Db } from "@orchestorai/db";
 import {
   agentSlackApps,
   agents,
@@ -13,7 +13,7 @@ import {
   projects,
   slackEventReceipts,
   slackThreadLinks,
-} from "@paperclipai/db";
+} from "@orchestorai/db";
 import type {
   AgentSlackApp,
   LiveEvent,
@@ -21,8 +21,8 @@ import type {
   ProjectSlackMembership,
   ProjectSlackState,
   SlackThreadLink,
-} from "@paperclipai/shared";
-import { buildProjectSlackChannelName } from "@paperclipai/shared";
+} from "@orchestorai/shared";
+import { buildProjectSlackChannelName } from "@orchestorai/shared";
 import { createInstanceSettingsService } from "./instance-settings.js";
 import { logger } from "../middleware/logger.js";
 import { secretService } from "./secrets.js";
@@ -73,7 +73,7 @@ type SlackIssue = {
 const liveEventForwarderDbs = new WeakSet<object>();
 const issueThreadLinkInFlight = new Map<string, Promise<SlackThreadLink | null>>();
 const projectChannelEnsureInFlight = new Map<string, Promise<ProjectSlackChannel | null>>();
-const SLACK_FORWARDER_STATE_KEY = "__paperclipSlackForwarderState";
+const SLACK_FORWARDER_STATE_KEY = "__orchestoraiSlackForwarderState";
 
 type SlackForwarderState = {
   db: object | null;
@@ -251,7 +251,7 @@ function buildSlackBotDisplayName(agentName: string): string {
 }
 
 function buildArchivedSlackChannelPlaceholderName(projectId: string, attempt: number) {
-  const base = `paperclip-archived-${projectId.toLowerCase().slice(0, 8)}`;
+  const base = `orchestorai-archived-${projectId.toLowerCase().slice(0, 8)}`;
   return truncate(
     attempt <= 1 ? base : `${base}-${attempt.toString(36)}`,
     80,
@@ -365,7 +365,7 @@ function issueRootMessage(
   issue: Pick<SlackIssue, "id" | "identifier" | "title" | "status" | "priority">,
 ) {
   return [
-    `Paperclip issue: *${issueDisplay(issue)}*`,
+    `OrchestorAI issue: *${issueDisplay(issue)}*`,
     `Status: \`${issue.status}\``,
     `Priority: \`${issue.priority}\``,
   ].join("\n");
@@ -642,7 +642,7 @@ export function slackIntegrationService(db: Db) {
         name,
         provider: config.secretsProvider,
         value,
-        description: `Paperclip-managed Slack ${kind} for agent ${agentId}`,
+        description: `OrchestorAI-managed Slack ${kind} for agent ${agentId}`,
       },
       actor,
     );
@@ -1157,7 +1157,7 @@ export function slackIntegrationService(db: Db) {
         ? "Board comment:"
         : comment.authorAgentId != null
           ? null
-          : "Paperclip update:";
+          : "OrchestorAI update:";
 
     const text = prefix ? `${prefix}\n${comment.body}` : comment.body;
     await postThreadMessage({
@@ -1316,7 +1316,7 @@ export function slackIntegrationService(db: Db) {
 
     await postThreadMessage({
       issue,
-      text: `Created Paperclip issue *${issueDisplay(issue)}*.`,
+      text: `Created OrchestorAI issue *${issueDisplay(issue)}*.`,
       ensureThread: false,
     });
 
@@ -1434,7 +1434,7 @@ export function slackIntegrationService(db: Db) {
             await controlClient.postMessage({
               channel: channelId,
               threadTs,
-              text: "Use `task: <title>` to create a Paperclip issue in this project channel.",
+              text: "Use `task: <title>` to create a OrchestorAI issue in this project channel.",
             });
           } catch (error) {
             logger.warn({ err: error, channelId }, "failed to post Slack task usage hint");

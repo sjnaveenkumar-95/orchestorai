@@ -1,4 +1,4 @@
-import { readReferenceAliases } from "@paperclipai/shared";
+import { readReferenceAliases } from "@orchestorai/shared";
 
 export function getPrimaryReferenceAlias(metadata: Record<string, unknown> | null | undefined): string {
   return readReferenceAliases(metadata)?.primaryAlias ?? "";

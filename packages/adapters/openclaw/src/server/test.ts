@@ -2,8 +2,8 @@ import type {
   AdapterEnvironmentCheck,
   AdapterEnvironmentTestContext,
   AdapterEnvironmentTestResult,
-} from "@paperclipai/adapter-utils";
-import { asString, parseObject } from "@paperclipai/adapter-utils/server-utils";
+} from "@orchestorai/adapter-utils";
+import { asString, parseObject } from "@orchestorai/adapter-utils/server-utils";
 
 function summarizeStatus(checks: AdapterEnvironmentCheck[]): AdapterEnvironmentTestResult["status"] {
   if (checks.some((check) => check.level === "error")) return "fail";
@@ -79,8 +79,8 @@ function pushDeploymentDiagnostics(
       checks.push({
         code: "openclaw_private_bind_hostname_not_allowed",
         level: "warn",
-        message: `Paperclip bind host "${bindHost}" is not in allowed hostnames.`,
-        hint: `Run pnpm paperclipai allowed-hostname ${bindHost} so remote OpenClaw callbacks can pass host checks.`,
+        message: `OrchestorAI bind host "${bindHost}" is not in allowed hostnames.`,
+        hint: `Run pnpm orchestorai allowed-hostname ${bindHost} so remote OpenClaw callbacks can pass host checks.`,
       });
     }
 
@@ -88,7 +88,7 @@ function pushDeploymentDiagnostics(
       checks.push({
         code: "openclaw_private_bind_loopback",
         level: "warn",
-        message: "Paperclip is bound to loopback in authenticated/private mode.",
+        message: "OrchestorAI is bound to loopback in authenticated/private mode.",
         hint: "Bind to a reachable private hostname/IP so remote OpenClaw agents can call back.",
       });
     }
@@ -98,7 +98,7 @@ function pushDeploymentDiagnostics(
         code: "openclaw_private_no_allowed_hostnames",
         level: "warn",
         message: "No explicit allowed hostnames are configured for authenticated/private mode.",
-        hint: "Set one with pnpm paperclipai allowed-hostname <host> when OpenClaw runs on another machine.",
+        hint: "Set one with pnpm orchestorai allowed-hostname <host> when OpenClaw runs on another machine.",
       });
     }
   }
@@ -168,7 +168,7 @@ export async function testEnvironment(
       checks.push({
         code: "openclaw_loopback_endpoint",
         level: "warn",
-        message: "Endpoint uses loopback hostname. Remote OpenClaw workers cannot reach localhost on the Paperclip host.",
+        message: "Endpoint uses loopback hostname. Remote OpenClaw workers cannot reach localhost on the OrchestorAI host.",
         hint: "Use a reachable hostname/IP (for example Tailscale/private hostname or public domain).",
       });
     }
@@ -231,7 +231,7 @@ export async function testEnvironment(
         code: "openclaw_endpoint_probe_failed",
         level: "warn",
         message: err instanceof Error ? err.message : "Endpoint probe failed",
-        hint: "This may be expected in restricted networks; validate from the Paperclip server host.",
+        hint: "This may be expected in restricted networks; validate from the OrchestorAI server host.",
       });
     } finally {
       clearTimeout(timeout);

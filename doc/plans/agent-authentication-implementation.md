@@ -17,10 +17,10 @@
   - `exp`
   - optional `jti` (run token id)
 - New config/env settings:
-  - `PAPERCLIP_AGENT_JWT_SECRET`
-  - `PAPERCLIP_AGENT_JWT_TTL_SECONDS` (default: `172800`)
-  - `PAPERCLIP_AGENT_JWT_ISSUER` (default: `paperclip`)
-  - `PAPERCLIP_AGENT_JWT_AUDIENCE` (default: `paperclip-api`)
+  - `ORCHESTORAI_AGENT_JWT_SECRET`
+  - `ORCHESTORAI_AGENT_JWT_TTL_SECONDS` (default: `172800`)
+  - `ORCHESTORAI_AGENT_JWT_ISSUER` (default: `orchestorai`)
+  - `ORCHESTORAI_AGENT_JWT_AUDIENCE` (default: `orchestorai-api`)
 
 ## 2) Dual authentication path in `actorMiddleware`
 
@@ -48,24 +48,24 @@
    - `packages/adapters/claude-local/src/server/execute.ts`
    - `packages/adapters/codex-local/src/server/execute.ts`
 
-   inject `PAPERCLIP_API_KEY` from context token.
+   inject `ORCHESTORAI_API_KEY` from context token.
 
 - Preserve existing behavior for explicit user-defined env vars in `adapterConfig.env`:
-  - if user already sets `PAPERCLIP_API_KEY`, do not overwrite it.
+  - if user already sets `ORCHESTORAI_API_KEY`, do not overwrite it.
 - Continue injecting:
-  - `PAPERCLIP_AGENT_ID`
-  - `PAPERCLIP_COMPANY_ID`
-  - `PAPERCLIP_API_URL`
+  - `ORCHESTORAI_AGENT_ID`
+  - `ORCHESTORAI_COMPANY_ID`
+  - `ORCHESTORAI_API_URL`
 
 ## 5) Documentation updates
 
 - Update operator-facing docs to remove manual key setup expectation for local adapters:
-  - `skills/paperclip/SKILL.md`
+  - `skills/orchestorai/SKILL.md`
   - `cli/src/commands/heartbeat-run.ts` output/help examples if they mention manual API key setup.
 
 ## 6) P0 acceptance criteria
 
-- Local adapters authenticate without manual `PAPERCLIP_API_KEY` config.
+- Local adapters authenticate without manual `ORCHESTORAI_API_KEY` config.
 - Existing static keys (`agent_api_keys`) still work unchanged.
 - Auth remains company-scoped (`req.actor.companyId` used by existing checks).
 - JWT generation and verification errors are logged as non-leaking structured events.

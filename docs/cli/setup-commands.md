@@ -5,32 +5,32 @@ summary: Onboard, run, doctor, and configure
 
 Instance setup and diagnostics commands.
 
-## `paperclipai run`
+## `orchestorai run`
 
 One-command bootstrap and start:
 
 ```sh
-pnpm paperclipai run
+pnpm orchestorai run
 ```
 
 Does:
 
 1. Auto-onboards if config is missing
-2. Runs `paperclipai doctor` with repair enabled
+2. Runs `orchestorai doctor` with repair enabled
 3. Starts the server when checks pass
 
 Choose a specific instance:
 
 ```sh
-pnpm paperclipai run --instance dev
+pnpm orchestorai run --instance dev
 ```
 
-## `paperclipai onboard`
+## `orchestorai onboard`
 
 Interactive first-time setup:
 
 ```sh
-pnpm paperclipai onboard
+pnpm orchestorai onboard
 ```
 
 First prompt:
@@ -41,22 +41,22 @@ First prompt:
 Start immediately after onboarding:
 
 ```sh
-pnpm paperclipai onboard --run
+pnpm orchestorai onboard --run
 ```
 
 Non-interactive defaults + immediate start (opens browser on server listen):
 
 ```sh
-pnpm paperclipai onboard --yes
+pnpm orchestorai onboard --yes
 ```
 
-## `paperclipai doctor`
+## `orchestorai doctor`
 
 Health checks with optional auto-repair:
 
 ```sh
-pnpm paperclipai doctor
-pnpm paperclipai doctor --repair
+pnpm orchestorai doctor
+pnpm orchestorai doctor --repair
 ```
 
 Validates:
@@ -67,51 +67,51 @@ Validates:
 - Storage configuration
 - Missing key files
 
-## `paperclipai configure`
+## `orchestorai configure`
 
 Update configuration sections:
 
 ```sh
-pnpm paperclipai configure --section server
-pnpm paperclipai configure --section secrets
-pnpm paperclipai configure --section storage
+pnpm orchestorai configure --section server
+pnpm orchestorai configure --section secrets
+pnpm orchestorai configure --section storage
 ```
 
-## `paperclipai env`
+## `orchestorai env`
 
 Show resolved environment configuration:
 
 ```sh
-pnpm paperclipai env
+pnpm orchestorai env
 ```
 
-## `paperclipai allowed-hostname`
+## `orchestorai allowed-hostname`
 
 Allow a private hostname for authenticated/private mode:
 
 ```sh
-pnpm paperclipai allowed-hostname my-tailscale-host
+pnpm orchestorai allowed-hostname my-tailscale-host
 ```
 
 ## Local Storage Paths
 
 | Data | Default Path |
 |------|-------------|
-| Config | `~/.paperclip/instances/default/config.json` |
-| Database | `~/.paperclip/instances/default/db` |
-| Logs | `~/.paperclip/instances/default/logs` |
-| Storage | `~/.paperclip/instances/default/data/storage` |
-| Secrets key | `~/.paperclip/instances/default/secrets/master.key` |
+| Config | `~/.orchestorai/instances/default/config.json` |
+| Database | `~/.orchestorai/instances/default/db` |
+| Logs | `~/.orchestorai/instances/default/logs` |
+| Storage | `~/.orchestorai/instances/default/data/storage` |
+| Secrets key | `~/.orchestorai/instances/default/secrets/master.key` |
 
 Override with:
 
 ```sh
-PAPERCLIP_HOME=/custom/home PAPERCLIP_INSTANCE_ID=dev pnpm paperclipai run
+ORCHESTORAI_HOME=/custom/home ORCHESTORAI_INSTANCE_ID=dev pnpm orchestorai run
 ```
 
 Or pass `--data-dir` directly on any command:
 
 ```sh
-pnpm paperclipai run --data-dir ./tmp/paperclip-dev
-pnpm paperclipai doctor --data-dir ./tmp/paperclip-dev
+pnpm orchestorai run --data-dir ./tmp/orchestorai-dev
+pnpm orchestorai doctor --data-dir ./tmp/orchestorai-dev
 ```

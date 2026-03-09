@@ -1,5 +1,5 @@
-import type { AdapterExecutionContext, AdapterExecutionResult } from "@paperclipai/adapter-utils";
-import { asString } from "@paperclipai/adapter-utils/server-utils";
+import type { AdapterExecutionContext, AdapterExecutionResult } from "@orchestorai/adapter-utils";
+import { asString } from "@orchestorai/adapter-utils/server-utils";
 import { isHookEndpoint } from "./execute-common.js";
 import { executeSse } from "./execute-sse.js";
 import { executeWebhook } from "./execute-webhook.js";

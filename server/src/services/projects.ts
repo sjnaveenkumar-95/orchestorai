@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
-import type { Db } from "@paperclipai/db";
+import type { Db } from "@orchestorai/db";
 import {
   agents,
   goals,
@@ -8,7 +8,7 @@ import {
   projectSlackChannels,
   projectWorkspaces,
   projects,
-} from "@paperclipai/db";
+} from "@orchestorai/db";
 import {
   PROJECT_COLORS,
   deriveProjectUrlKey,
@@ -20,7 +20,7 @@ import {
   type ProjectMember,
   type ProjectSlackChannelSummary,
   type ProjectWorkspace,
-} from "@paperclipai/shared";
+} from "@orchestorai/shared";
 import {
   applyResolvedReferenceAliases,
   resolveEntityReferenceAliases,
@@ -29,7 +29,7 @@ import {
 
 type ProjectRow = typeof projects.$inferSelect;
 type ProjectWorkspaceRow = typeof projectWorkspaces.$inferSelect;
-const REPO_ONLY_CWD_SENTINEL = "/__paperclip_repo_only__";
+const REPO_ONLY_CWD_SENTINEL = "/__orchestorai_repo_only__";
 type CreateWorkspaceInput = {
   name?: string | null;
   cwd?: string | null;

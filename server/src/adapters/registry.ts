@@ -3,23 +3,23 @@ import {
   execute as claudeExecute,
   testEnvironment as claudeTestEnvironment,
   sessionCodec as claudeSessionCodec,
-} from "@paperclipai/adapter-claude-local/server";
-import { agentConfigurationDoc as claudeAgentConfigurationDoc, models as claudeModels } from "@paperclipai/adapter-claude-local";
+} from "@orchestorai/adapter-claude-local/server";
+import { agentConfigurationDoc as claudeAgentConfigurationDoc, models as claudeModels } from "@orchestorai/adapter-claude-local";
 import {
   execute as codexExecute,
   testEnvironment as codexTestEnvironment,
   sessionCodec as codexSessionCodec,
-} from "@paperclipai/adapter-codex-local/server";
-import { agentConfigurationDoc as codexAgentConfigurationDoc, models as codexModels } from "@paperclipai/adapter-codex-local";
+} from "@orchestorai/adapter-codex-local/server";
+import { agentConfigurationDoc as codexAgentConfigurationDoc, models as codexModels } from "@orchestorai/adapter-codex-local";
 import {
   execute as openclawExecute,
   testEnvironment as openclawTestEnvironment,
   onHireApproved as openclawOnHireApproved,
-} from "@paperclipai/adapter-openclaw/server";
+} from "@orchestorai/adapter-openclaw/server";
 import {
   agentConfigurationDoc as openclawAgentConfigurationDoc,
   models as openclawModels,
-} from "@paperclipai/adapter-openclaw";
+} from "@orchestorai/adapter-openclaw";
 import { listCodexModels } from "./codex-models.js";
 import { processAdapter } from "./process/index.js";
 import { httpAdapter } from "./http/index.js";

@@ -9,7 +9,7 @@ function isNonEmpty(value) {
 function findLegacyConfigFromAncestors(startDir) {
   let currentDir = path.resolve(startDir);
   while (true) {
-    const candidate = path.resolve(currentDir, ".paperclip", "config.json");
+    const candidate = path.resolve(currentDir, ".orchestorai", "config.json");
     if (fs.existsSync(candidate)) {
       return candidate;
     }
@@ -22,21 +22,21 @@ function findLegacyConfigFromAncestors(startDir) {
   return null;
 }
 
-export function resolvePaperclipEnvPath({ cwd = process.cwd(), env = process.env } = {}) {
-  const explicitEnvPath = env.PAPERCLIP_ENV_FILE;
+export function resolveOrchestorAIEnvPath({ cwd = process.cwd(), env = process.env } = {}) {
+  const explicitEnvPath = env.ORCHESTORAI_ENV_FILE;
   if (isNonEmpty(explicitEnvPath)) {
     return path.resolve(explicitEnvPath.trim());
   }
 
-  const configPath = env.PAPERCLIP_CONFIG;
+  const configPath = env.ORCHESTORAI_CONFIG;
   if (isNonEmpty(configPath)) {
     return path.resolve(path.dirname(configPath.trim()), ".env");
   }
 
-  const paperclipHome = env.PAPERCLIP_HOME;
-  if (isNonEmpty(paperclipHome)) {
-    const instanceId = isNonEmpty(env.PAPERCLIP_INSTANCE_ID) ? env.PAPERCLIP_INSTANCE_ID.trim() : "default";
-    return path.resolve(paperclipHome.trim(), "instances", instanceId, ".env");
+  const orchestoraiHome = env.ORCHESTORAI_HOME;
+  if (isNonEmpty(orchestoraiHome)) {
+    const instanceId = isNonEmpty(env.ORCHESTORAI_INSTANCE_ID) ? env.ORCHESTORAI_INSTANCE_ID.trim() : "default";
+    return path.resolve(orchestoraiHome.trim(), "instances", instanceId, ".env");
   }
 
   const legacyConfig = findLegacyConfigFromAncestors(cwd);
@@ -47,12 +47,12 @@ export function resolvePaperclipEnvPath({ cwd = process.cwd(), env = process.env
   return null;
 }
 
-export function loadPaperclipEnvIntoProcess({
+export function loadOrchestorAIEnvIntoProcess({
   cwd = process.cwd(),
   env = process.env,
   keys = [],
 } = {}) {
-  const envPath = resolvePaperclipEnvPath({ cwd, env });
+  const envPath = resolveOrchestorAIEnvPath({ cwd, env });
   if (!envPath || !fs.existsSync(envPath)) {
     return null;
   }

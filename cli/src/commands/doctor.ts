@@ -1,6 +1,6 @@
 import * as p from "@clack/prompts";
 import pc from "picocolors";
-import type { PaperclipConfig } from "../config/schema.js";
+import type { OrchestorAIConfig } from "../config/schema.js";
 import { readConfig, resolveConfigPath } from "../config/store.js";
 import {
   agentJwtSecretCheck,
@@ -14,7 +14,7 @@ import {
   storageCheck,
   type CheckResult,
 } from "../checks/index.js";
-import { printPaperclipCliBanner } from "../utils/banner.js";
+import { printOrchestorAICliBanner } from "../utils/banner.js";
 
 const STATUS_ICON = {
   pass: pc.green("✓"),
@@ -27,8 +27,8 @@ export async function doctor(opts: {
   repair?: boolean;
   yes?: boolean;
 }): Promise<{ passed: number; warned: number; failed: number }> {
-  printPaperclipCliBanner();
-  p.intro(pc.bgCyan(pc.black(" paperclip doctor ")));
+  printOrchestorAICliBanner();
+  p.intro(pc.bgCyan(pc.black(" orchestorai doctor ")));
 
   const configPath = resolveConfigPath(opts.config);
   const results: CheckResult[] = [];
@@ -42,7 +42,7 @@ export async function doctor(opts: {
     return printSummary(results);
   }
 
-  let config: PaperclipConfig;
+  let config: OrchestorAIConfig;
   try {
     config = readConfig(opts.config)!;
   } catch (err) {
@@ -51,7 +51,7 @@ export async function doctor(opts: {
       status: "fail",
       message: `Could not read config: ${err instanceof Error ? err.message : String(err)}`,
       canRepair: false,
-      repairHint: "Run `paperclipai configure --section database` or `paperclipai onboard`",
+      repairHint: "Run `orchestorai configure --section database` or `orchestorai onboard`",
     };
     results.push(readResult);
     printResult(readResult);

@@ -1,5 +1,5 @@
 {
-  "name": "@paperclipai/adapter-utils",
+  "name": "@orchestorai/adapter-utils",
   "version": "0.2.7",
   "type": "module",
   "exports": {

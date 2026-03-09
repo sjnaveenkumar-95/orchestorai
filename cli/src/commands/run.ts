@@ -8,8 +8,8 @@ import { doctor } from "./doctor.js";
 import { configExists, resolveConfigPath } from "../config/store.js";
 import {
   describeLocalInstancePaths,
-  resolvePaperclipHomeDir,
-  resolvePaperclipInstanceId,
+  resolveOrchestorAIHomeDir,
+  resolveOrchestorAIInstanceId,
 } from "../config/home.js";
 
 interface RunOptions {
@@ -20,19 +20,19 @@ interface RunOptions {
 }
 
 export async function runCommand(opts: RunOptions): Promise<void> {
-  const instanceId = resolvePaperclipInstanceId(opts.instance);
-  process.env.PAPERCLIP_INSTANCE_ID = instanceId;
+  const instanceId = resolveOrchestorAIInstanceId(opts.instance);
+  process.env.ORCHESTORAI_INSTANCE_ID = instanceId;
 
-  const homeDir = resolvePaperclipHomeDir();
+  const homeDir = resolveOrchestorAIHomeDir();
   fs.mkdirSync(homeDir, { recursive: true });
 
   const paths = describeLocalInstancePaths(instanceId);
   fs.mkdirSync(paths.instanceRoot, { recursive: true });
 
   const configPath = resolveConfigPath(opts.config);
-  process.env.PAPERCLIP_CONFIG = configPath;
+  process.env.ORCHESTORAI_CONFIG = configPath;
 
-  p.intro(pc.bgCyan(pc.black(" paperclipai run ")));
+  p.intro(pc.bgCyan(pc.black(" orchestorai run ")));
   p.log.message(pc.dim(`Home: ${paths.homeDir}`));
   p.log.message(pc.dim(`Instance: ${paths.instanceId}`));
   p.log.message(pc.dim(`Config: ${configPath}`));
@@ -41,7 +41,7 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     const isInteractive = process.stdin.isTTY && process.stdout.isTTY;
     if (!isInteractive && !opts.yes) {
       p.log.error("No config found and terminal is non-interactive.");
-      p.log.message(`Run ${pc.cyan("paperclipai onboard")} once, then retry ${pc.cyan("paperclipai run")}.`);
+      p.log.message(`Run ${pc.cyan("orchestorai onboard")} once, then retry ${pc.cyan("orchestorai run")}.`);
       process.exit(1);
     }
 
@@ -64,7 +64,7 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     process.exit(1);
   }
 
-  p.log.step("Starting Paperclip server...");
+  p.log.step("Starting OrchestorAI server...");
   await importServerEntry();
 }
 
@@ -98,10 +98,10 @@ function getMissingModuleSpecifier(err: unknown): string | null {
 }
 
 function maybeEnableUiDevMiddleware(entrypoint: string): void {
-  if (process.env.PAPERCLIP_UI_DEV_MIDDLEWARE !== undefined) return;
+  if (process.env.ORCHESTORAI_UI_DEV_MIDDLEWARE !== undefined) return;
   const normalized = entrypoint.replaceAll("\\", "/");
-  if (normalized.endsWith("/server/src/index.ts") || normalized.endsWith("@paperclipai/server/src/index.ts")) {
-    process.env.PAPERCLIP_UI_DEV_MIDDLEWARE = "true";
+  if (normalized.endsWith("/server/src/index.ts") || normalized.endsWith("@orchestorai/server/src/index.ts")) {
+    process.env.ORCHESTORAI_UI_DEV_MIDDLEWARE = "true";
   }
 }
 
@@ -121,21 +121,21 @@ async function importServerEntry(): Promise<void> {
     return;
   }
 
-  // Production mode: import the published @paperclipai/server package
+  // Production mode: import the published @orchestorai/server package
   try {
-    await import("@paperclipai/server");
+    await import("@orchestorai/server");
   } catch (err) {
     const missingSpecifier = getMissingModuleSpecifier(err);
-    const missingServerEntrypoint = !missingSpecifier || missingSpecifier === "@paperclipai/server";
+    const missingServerEntrypoint = !missingSpecifier || missingSpecifier === "@orchestorai/server";
     if (isModuleNotFoundError(err) && missingServerEntrypoint) {
       throw new Error(
-        `Could not locate a Paperclip server entrypoint.\n` +
-          `Tried: ${devEntry}, @paperclipai/server\n` +
+        `Could not locate a OrchestorAI server entrypoint.\n` +
+          `Tried: ${devEntry}, @orchestorai/server\n` +
           `${formatError(err)}`,
       );
     }
     throw new Error(
-      `Paperclip server failed to start.\n` +
+      `OrchestorAI server failed to start.\n` +
         `${formatError(err)}`,
     );
   }

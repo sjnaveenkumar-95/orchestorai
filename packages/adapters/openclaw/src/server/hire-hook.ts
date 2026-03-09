@@ -1,5 +1,5 @@
-import type { HireApprovedPayload, HireApprovedHookResult } from "@paperclipai/adapter-utils";
-import { asString, parseObject } from "@paperclipai/adapter-utils/server-utils";
+import type { HireApprovedPayload, HireApprovedHookResult } from "@orchestorai/adapter-utils";
+import { asString, parseObject } from "@orchestorai/adapter-utils/server-utils";
 
 const HIRE_CALLBACK_TIMEOUT_MS = 10_000;
 
