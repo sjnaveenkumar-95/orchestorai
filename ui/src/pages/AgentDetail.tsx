@@ -55,6 +55,7 @@ import {
   ChevronDown,
   ArrowLeft,
   Settings,
+  ExternalLink,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { AgentIcon, AgentIconPicker } from "../components/AgentIconPicker";
@@ -293,6 +294,12 @@ export function AgentDetail() {
     enabled: !!resolvedCompanyId,
   });
 
+  const { data: slackApp } = useQuery({
+    queryKey: queryKeys.agents.slackApp(agentLookupRef),
+    queryFn: () => agentsApi.getSlackApp(agentLookupRef, resolvedCompanyId ?? undefined),
+    enabled: Boolean(agentLookupRef && resolvedCompanyId),
+  });
+
   const assignedIssues = (allIssues ?? [])
     .filter((i) => i.assigneeAgentId === agent?.id)
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
@@ -393,6 +400,17 @@ export function AgentDetail() {
     },
   });
 
+  const provisionSlackApp = useMutation({
+    mutationFn: () => agentsApi.provisionSlackApp(agentLookupRef, resolvedCompanyId ?? undefined),
+    onSuccess: () => {
+      setActionError(null);
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.slackApp(agentLookupRef) });
+    },
+    onError: (err) => {
+      setActionError(err instanceof Error ? err.message : "Failed to provision Slack app");
+    },
+  });
+
   useEffect(() => {
     const crumbs: { label: string; href?: string }[] = [
       { label: "Agents", href: "/agents" },
@@ -432,6 +450,7 @@ export function AgentDetail() {
   if (!agent) return null;
   const isPendingApproval = agent.status === "pending_approval";
   const slackAlias = formatAgentReferenceAlias(agent.metadata);
+  const slackInstallLink = slackApp?.installUrl ?? null;
   const showConfigActionBar = activeView === "configure" && configDirty;
 
   return (
@@ -460,6 +479,36 @@ export function AgentDetail() {
                 </Badge>
                 <CopyText text={slackAlias} />
               </div>
+            ) : null}
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Badge variant="outline" className="text-[11px]">
+                Slack app: {(slackApp?.installStatus ?? "not_configured").replace("_", " ")}
+              </Badge>
+              {slackInstallLink ? (
+                <a
+                  href={slackInstallLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
+                >
+                  Install in Slack
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              ) : null}
+              {slackApp?.installStatus !== "active" ? (
+                <Button
+                  variant="outline"
+                  size="xs"
+                  className="h-6 px-2"
+                  disabled={provisionSlackApp.isPending || isPendingApproval}
+                  onClick={() => provisionSlackApp.mutate()}
+                >
+                  {provisionSlackApp.isPending ? "Provisioning..." : "Provision Slack app"}
+                </Button>
+              ) : null}
+            </div>
+            {slackApp?.lastError ? (
+              <p className="mt-2 text-xs text-destructive">{slackApp.lastError}</p>
             ) : null}
           </div>
         </div>

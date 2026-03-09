@@ -182,6 +182,8 @@ Invariant: at least one root `company` level goal per company.
 - `goal_id` uuid fk `goals.id` null
 - `name` text not null
 - `description` text null
+- `issue_prefix` text null, unique when allocated
+- `issue_counter` int not null default 0
 - `status` enum: `backlog | planned | in_progress | completed | cancelled`
 - `lead_agent_id` uuid fk `agents.id` null
 - `target_date` date null
@@ -202,6 +204,8 @@ Invariant: at least one root `company` level goal per company.
 - `created_by_user_id` uuid fk `users.id` null
 - `request_depth` int not null default 0
 - `billing_code` text null
+- `issue_number` int null
+- `identifier` text null, globally unique
 - `started_at` timestamptz null
 - `completed_at` timestamptz null
 - `cancelled_at` timestamptz null
@@ -211,6 +215,7 @@ Invariants:
 - single assignee only
 - task must trace to company goal chain via `goal_id`, `parent_id`, or project-goal linkage
 - `in_progress` requires assignee
+- issues attached to a project use that project's allocated prefix and counter for identifiers; unprojected issues use the company prefix/counter
 - terminal states: `done | cancelled`
 
 ## 7.7 `issue_comments`

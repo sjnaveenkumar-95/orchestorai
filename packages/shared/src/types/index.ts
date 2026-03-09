@@ -10,7 +10,21 @@ export type {
   AdapterEnvironmentTestResult,
 } from "./agent.js";
 export type { AssetImage } from "./asset.js";
-export type { Project, ProjectGoalRef, ProjectWorkspace } from "./project.js";
+export type {
+  Project,
+  ProjectGoalRef,
+  ProjectMember,
+  ProjectSlackChannelSummary,
+  ProjectWorkspace,
+} from "./project.js";
+export type {
+  AgentSlackApp,
+  ProjectSlackChannel,
+  ProjectSlackMembership,
+  ProjectSlackMembershipState,
+  ProjectSlackState,
+  SlackThreadLink,
+} from "./slack.js";
 export type {
   Issue,
   IssueAssigneeAdapterOverrides,
@@ -48,6 +62,8 @@ export type { SidebarBadges } from "./sidebar-badges.js";
 export type {
   InstanceRuntimeSecretSource,
   InstanceRuntimeSecretStatus,
+  InstanceRuntimeValueSource,
+  InstanceRuntimeValueStatus,
   InstanceRuntimeSettings,
 } from "./instance-settings.js";
 export type {

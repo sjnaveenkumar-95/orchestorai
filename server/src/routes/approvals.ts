@@ -15,6 +15,7 @@ import {
   issueApprovalService,
   logActivity,
   secretService,
+  slackIntegrationService,
 } from "../services/index.js";
 import { assertBoard, assertCompanyAccess, getActorInfo } from "./authz.js";
 import { redactEventPayload } from "../redaction.js";
@@ -32,6 +33,7 @@ export function approvalRoutes(db: Db) {
   const heartbeat = heartbeatService(db);
   const issueApprovalsSvc = issueApprovalService(db);
   const secretsSvc = secretService(db);
+  const slackSvc = slackIntegrationService(db);
   const strictSecretsMode = process.env.PAPERCLIP_SECRETS_STRICT_MODE === "true";
 
   router.get("/companies/:companyId/approvals", async (req, res) => {
@@ -199,6 +201,18 @@ export function approvalRoutes(db: Db) {
             linkedIssueIds,
             error: err instanceof Error ? err.message : String(err),
           },
+        });
+      }
+    }
+
+    if (approval.type === "hire_agent") {
+      const payload = approval.payload as Record<string, unknown>;
+      const agentId = typeof payload.agentId === "string" ? payload.agentId : null;
+      if (agentId) {
+        void slackSvc.provisionAgentApp(agentId, {
+          userId: req.actor.userId ?? "board",
+        }).catch((err) => {
+          logger.warn({ err, approvalId: approval.id, agentId }, "failed to provision Slack app after hire approval");
         });
       }
     }

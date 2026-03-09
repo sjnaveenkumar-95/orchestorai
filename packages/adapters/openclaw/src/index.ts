@@ -14,7 +14,7 @@ Use when:
   - \`webhook\` for wake-style callbacks (\`/hooks/wake\`, \`/hooks/agent\`, or compatibility webhooks).
 
 Don't use when:
-- You need local CLI execution inside Paperclip (use claude_local/codex_local/opencode_local/process).
+- You need local CLI execution inside Paperclip (use claude_local/codex_local/process).
 - The OpenClaw endpoint is not reachable from the Paperclip server.
 
 Core fields:

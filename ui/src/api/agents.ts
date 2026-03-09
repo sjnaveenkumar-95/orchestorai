@@ -7,6 +7,7 @@ import type {
   HeartbeatRun,
   Approval,
   AgentConfigRevision,
+  AgentSlackApp,
 } from "@paperclipai/shared";
 import { isUuidLike, normalizeAgentUrlKey } from "@paperclipai/shared";
 import { ApiError, api } from "./client";
@@ -88,6 +89,10 @@ export const agentsApi = {
   },
   getConfiguration: (id: string, companyId?: string) =>
     api.get<Record<string, unknown>>(agentPath(id, companyId, "/configuration")),
+  getSlackApp: (id: string, companyId?: string) =>
+    api.get<AgentSlackApp | null>(agentPath(id, companyId, "/slack")),
+  provisionSlackApp: (id: string, companyId?: string) =>
+    api.post<AgentSlackApp>(agentPath(id, companyId, "/slack/provision"), {}),
   listConfigRevisions: (id: string, companyId?: string) =>
     api.get<AgentConfigRevision[]>(agentPath(id, companyId, "/config-revisions")),
   getConfigRevision: (id: string, revisionId: string, companyId?: string) =>

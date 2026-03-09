@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { resolveDefaultConfigPath } from "./home-paths.js";
+import { resolveDefaultConfigPath, resolveDefaultEnvPath } from "./home-paths.js";
 
 const PAPERCLIP_CONFIG_BASENAME = "config.json";
 const PAPERCLIP_ENV_FILENAME = ".env";
@@ -30,5 +30,8 @@ export function resolvePaperclipConfigPath(overridePath?: string): string {
 }
 
 export function resolvePaperclipEnvPath(overrideConfigPath?: string): string {
-  return path.resolve(path.dirname(resolvePaperclipConfigPath(overrideConfigPath)), PAPERCLIP_ENV_FILENAME);
+  if (overrideConfigPath) {
+    return path.resolve(path.dirname(resolvePaperclipConfigPath(overrideConfigPath)), PAPERCLIP_ENV_FILENAME);
+  }
+  return resolveDefaultEnvPath();
 }

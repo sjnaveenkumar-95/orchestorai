@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { PROJECT_STATUSES } from "../constants.js";
+import { PROJECT_SLACK_CHANNEL_VISIBILITIES, PROJECT_STATUSES } from "../constants.js";
+import { normalizeSlackChannelName } from "../slack-channel-name.js";
 
 const projectWorkspaceFields = {
   name: z.string().min(1).optional(),
@@ -43,6 +44,14 @@ const projectFields = {
   leadAgentId: z.string().uuid().optional().nullable(),
   targetDate: z.string().optional().nullable(),
   color: z.string().optional().nullable(),
+  slackChannelVisibility: z.enum(PROJECT_SLACK_CHANNEL_VISIBILITIES).optional().default("public"),
+  slackChannelName: z
+    .string()
+    .trim()
+    .max(120)
+    .transform((value) => normalizeSlackChannelName(value))
+    .optional()
+    .nullable(),
   metadata: z.record(z.unknown()).optional().nullable(),
   archivedAt: z.string().datetime().optional().nullable(),
 };

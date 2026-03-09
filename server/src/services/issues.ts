@@ -13,10 +13,11 @@ import {
   issueReadStates,
   issues,
   labels,
+  projectMembers,
   projectWorkspaces,
   projects,
 } from "@paperclipai/db";
-import { extractProjectMentionIds } from "@paperclipai/shared";
+import { deriveProjectIssuePrefixBase, extractProjectMentionIds } from "@paperclipai/shared";
 import { conflict, notFound, unprocessable } from "../errors.js";
 
 const ALL_ISSUE_STATUSES = ["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"];
@@ -297,6 +298,24 @@ function withActiveRuns(
 }
 
 export function issueService(db: Db) {
+  function suffixForAttempt(attempt: number) {
+    if (attempt <= 1) return "";
+    return "A".repeat(attempt - 1);
+  }
+
+  function isProjectIssuePrefixConflict(error: unknown) {
+    const constraint = typeof error === "object" && error !== null && "constraint" in error
+      ? (error as { constraint?: string }).constraint
+      : typeof error === "object" && error !== null && "constraint_name" in error
+        ? (error as { constraint_name?: string }).constraint_name
+        : undefined;
+    return typeof error === "object"
+      && error !== null
+      && "code" in error
+      && (error as { code?: string }).code === "23505"
+      && constraint === "projects_issue_prefix_idx";
+  }
+
   async function assertAssignableAgent(companyId: string, agentId: string) {
     const assignee = await db
       .select({
@@ -335,6 +354,132 @@ export function issueService(db: Db) {
       .then((rows) => rows[0] ?? null);
     if (!membership) {
       throw notFound("Assignee user not found");
+    }
+  }
+
+  async function getProjectIdentity(
+    dbOrTx: any,
+    companyId: string,
+    projectId: string,
+  ) {
+    const project = await dbOrTx
+      .select({
+        id: projects.id,
+        companyId: projects.companyId,
+        name: projects.name,
+        issuePrefix: projects.issuePrefix,
+        issueCounter: projects.issueCounter,
+      })
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .then((rows: Array<{
+        id: string;
+        companyId: string;
+        name: string;
+        issuePrefix: string | null;
+        issueCounter: number;
+      }>) => rows[0] ?? null);
+
+    if (!project) {
+      throw notFound("Project not found");
+    }
+    if (project.companyId !== companyId) {
+      throw unprocessable("Project must belong to same company");
+    }
+
+    return project;
+  }
+
+  async function ensureProjectIssuePrefix(
+    dbOrTx: any,
+    input: {
+      companyId: string;
+      projectId: string;
+    },
+  ): Promise<string> {
+    let project = await getProjectIdentity(dbOrTx, input.companyId, input.projectId);
+    if (project.issuePrefix) {
+      return project.issuePrefix;
+    }
+
+    const existingIssueCount = await dbOrTx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(issues)
+      .where(eq(issues.projectId, input.projectId))
+      .then((rows: Array<{ count: number }>) => rows[0]?.count ?? 0);
+
+    const companyPrefixes = await dbOrTx
+      .select({ issuePrefix: companies.issuePrefix })
+      .from(companies)
+      .then((rows: Array<{ issuePrefix: string }>) => rows.map((row) => row.issuePrefix));
+    const projectPrefixes = await dbOrTx
+      .select({ issuePrefix: projects.issuePrefix })
+      .from(projects)
+      .where(sql`${projects.id} <> ${input.projectId}`)
+      .then((rows: Array<{ issuePrefix: string | null }>) =>
+        rows.map((row) => row.issuePrefix).filter((value): value is string => Boolean(value)),
+      );
+    const takenPrefixes = new Set<string>([...companyPrefixes, ...projectPrefixes]);
+    const basePrefix = deriveProjectIssuePrefixBase(project.name);
+
+    for (let attempt = 1; attempt < 10000; attempt += 1) {
+      const candidate = `${basePrefix}${suffixForAttempt(attempt)}`;
+      if (takenPrefixes.has(candidate)) continue;
+      try {
+        const updated = await dbOrTx
+          .update(projects)
+          .set({
+            issuePrefix: candidate,
+            issueCounter: existingIssueCount,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(projects.id, input.projectId),
+              eq(projects.companyId, input.companyId),
+              isNull(projects.issuePrefix),
+            ),
+          )
+          .returning({ issuePrefix: projects.issuePrefix })
+          .then((rows: Array<{ issuePrefix: string | null }>) => rows[0] ?? null);
+
+        if (updated?.issuePrefix) {
+          return updated.issuePrefix;
+        }
+
+        project = await getProjectIdentity(dbOrTx, input.companyId, input.projectId);
+        if (project.issuePrefix) {
+          return project.issuePrefix;
+        }
+      } catch (error) {
+        if (!isProjectIssuePrefixConflict(error)) throw error;
+      }
+    }
+
+    throw new Error("Unable to allocate unique project issue prefix");
+  }
+
+  async function assertProjectAssignableAgent(
+    companyId: string,
+    projectId: string,
+    agentId: string,
+  ) {
+    await getProjectIdentity(db, companyId, projectId);
+
+    const membership = await db
+      .select({ id: projectMembers.id })
+      .from(projectMembers)
+      .where(
+        and(
+          eq(projectMembers.projectId, projectId),
+          eq(projectMembers.companyId, companyId),
+          eq(projectMembers.agentId, agentId),
+        ),
+      )
+      .then((rows) => rows[0] ?? null);
+
+    if (!membership) {
+      throw unprocessable("Assignee must be a member of the selected project");
     }
   }
 
@@ -627,6 +772,12 @@ export function issueService(db: Db) {
       }
       if (data.assigneeAgentId) {
         await assertAssignableAgent(companyId, data.assigneeAgentId);
+        if (data.projectId) {
+          await assertProjectAssignableAgent(companyId, data.projectId, data.assigneeAgentId);
+        }
+      }
+      if (data.projectId) {
+        await getProjectIdentity(db, companyId, data.projectId);
       }
       if (data.assigneeUserId) {
         await assertAssignableUser(companyId, data.assigneeUserId);
@@ -635,14 +786,31 @@ export function issueService(db: Db) {
         throw unprocessable("in_progress issues require an assignee");
       }
       return db.transaction(async (tx) => {
-        const [company] = await tx
-          .update(companies)
-          .set({ issueCounter: sql`${companies.issueCounter} + 1` })
-          .where(eq(companies.id, companyId))
-          .returning({ issueCounter: companies.issueCounter, issuePrefix: companies.issuePrefix });
+        let issueNumber: number;
+        let identifier: string;
 
-        const issueNumber = company.issueCounter;
-        const identifier = `${company.issuePrefix}-${issueNumber}`;
+        if (issueData.projectId) {
+          const issuePrefix = await ensureProjectIssuePrefix(tx, {
+            companyId,
+            projectId: issueData.projectId,
+          });
+          const [project] = await tx
+            .update(projects)
+            .set({ issueCounter: sql`${projects.issueCounter} + 1`, updatedAt: new Date() })
+            .where(and(eq(projects.id, issueData.projectId), eq(projects.companyId, companyId)))
+            .returning({ issueCounter: projects.issueCounter });
+          issueNumber = project.issueCounter;
+          identifier = `${issuePrefix}-${issueNumber}`;
+        } else {
+          const [company] = await tx
+            .update(companies)
+            .set({ issueCounter: sql`${companies.issueCounter} + 1` })
+            .where(eq(companies.id, companyId))
+            .returning({ issueCounter: companies.issueCounter, issuePrefix: companies.issuePrefix });
+
+          issueNumber = company.issueCounter;
+          identifier = `${company.issuePrefix}-${issueNumber}`;
+        }
 
         const values = { ...issueData, companyId, issueNumber, identifier } as typeof issues.$inferInsert;
         if (values.status === "in_progress" && !values.startedAt) {
@@ -687,6 +855,8 @@ export function issueService(db: Db) {
         issueData.assigneeAgentId !== undefined ? issueData.assigneeAgentId : existing.assigneeAgentId;
       const nextAssigneeUserId =
         issueData.assigneeUserId !== undefined ? issueData.assigneeUserId : existing.assigneeUserId;
+      const nextProjectId =
+        issueData.projectId !== undefined ? issueData.projectId : existing.projectId;
 
       if (nextAssigneeAgentId && nextAssigneeUserId) {
         throw unprocessable("Issue can only have one assignee");
@@ -699,6 +869,16 @@ export function issueService(db: Db) {
       }
       if (issueData.assigneeUserId) {
         await assertAssignableUser(existing.companyId, issueData.assigneeUserId);
+      }
+      if (typeof issueData.projectId === "string") {
+        await getProjectIdentity(db, existing.companyId, issueData.projectId);
+      }
+      if (
+        (issueData.assigneeAgentId !== undefined || issueData.projectId !== undefined) &&
+        nextAssigneeAgentId &&
+        nextProjectId
+      ) {
+        await assertProjectAssignableAgent(existing.companyId, nextProjectId, nextAssigneeAgentId);
       }
 
       applyStatusSideEffects(issueData.status, patch);

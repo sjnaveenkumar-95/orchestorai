@@ -25,6 +25,7 @@ import { llmRoutes } from "./routes/llms.js";
 import { assetRoutes } from "./routes/assets.js";
 import { accessRoutes } from "./routes/access.js";
 import { instanceRoutes } from "./routes/instance.js";
+import { slackRoutes } from "./routes/slack.js";
 import type { BetterAuthSessionResult } from "./auth/better-auth.js";
 
 type UiMode = "none" | "static" | "vite-dev";
@@ -46,6 +47,7 @@ export async function createApp(
 ) {
   const app = express();
 
+  app.use("/api/slack/control/events", express.raw({ type: "application/json" }));
   app.use(express.json());
   app.use(httpLogger);
   const privateHostnameGateEnabled =
@@ -91,6 +93,7 @@ export async function createApp(
 
   // Mount API routes
   const api = Router();
+  api.use(slackRoutes(db));
   api.use(boardMutationGuard());
   api.use(
     "/health",

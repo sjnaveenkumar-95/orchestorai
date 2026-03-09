@@ -1,4 +1,9 @@
-import type { Project, ProjectWorkspace } from "@paperclipai/shared";
+import type {
+  Project,
+  ProjectMember,
+  ProjectSlackState,
+  ProjectWorkspace,
+} from "@paperclipai/shared";
 import { api } from "./client";
 
 function withCompanyScope(path: string, companyId?: string) {
@@ -20,6 +25,18 @@ export const projectsApi = {
     api.patch<Project>(projectPath(id, companyId), data),
   listWorkspaces: (projectId: string, companyId?: string) =>
     api.get<ProjectWorkspace[]>(projectPath(projectId, companyId, "/workspaces")),
+  listMembers: (projectId: string, companyId?: string) =>
+    api.get<ProjectMember[]>(projectPath(projectId, companyId, "/members")),
+  addMember: (projectId: string, data: { agentId: string }, companyId?: string) =>
+    api.post<ProjectMember>(projectPath(projectId, companyId, "/members"), data),
+  removeMember: (projectId: string, agentId: string, companyId?: string) =>
+    api.delete<ProjectMember>(projectPath(projectId, companyId, `/members/${encodeURIComponent(agentId)}`)),
+  getSlackState: (projectId: string, companyId?: string) =>
+    api.get<ProjectSlackState>(projectPath(projectId, companyId, "/slack")),
+  syncSlack: (projectId: string, companyId?: string) =>
+    api.post<ProjectSlackState>(projectPath(projectId, companyId, "/slack/sync"), {}),
+  archiveSlack: (projectId: string, companyId?: string) =>
+    api.post<ProjectSlackState>(projectPath(projectId, companyId, "/slack/archive"), {}),
   createWorkspace: (projectId: string, data: Record<string, unknown>, companyId?: string) =>
     api.post<ProjectWorkspace>(projectPath(projectId, companyId, "/workspaces"), data),
   updateWorkspace: (projectId: string, workspaceId: string, data: Record<string, unknown>, companyId?: string) =>

@@ -123,6 +123,12 @@ The database mode is controlled by `DATABASE_URL`:
 
 Your Drizzle schema (`packages/db/src/schema/`) stays the same regardless of mode.
 
+## Identifier allocation
+
+- Companies keep a deployment-wide unique `issue_prefix` plus `issue_counter` for issues that are not attached to a project.
+- Projects keep their own `issue_prefix` plus `issue_counter` for project-scoped issues.
+- Issue `identifier` values stay globally unique, so project prefixes are allocated to avoid collisions with existing company prefixes.
+
 ## Secret storage
 
 Paperclip stores secret metadata and versions in:

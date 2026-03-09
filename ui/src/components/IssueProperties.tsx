@@ -10,6 +10,11 @@ import { useCompany } from "../context/CompanyContext";
 import { queryKeys } from "../lib/queryKeys";
 import { useProjectOrder } from "../hooks/useProjectOrder";
 import { getRecentAssigneeIds, sortAgentsByRecency, trackRecentAssignee } from "../lib/recent-assignees";
+import {
+  filterAssignableAgents,
+  getProjectMemberAgentIds,
+  isAgentAssignableToProject,
+} from "../lib/assignable-agents";
 import { StatusIcon } from "./StatusIcon";
 import { PriorityIcon } from "./PriorityIcon";
 import { Identity } from "./Identity";
@@ -183,9 +188,15 @@ export function IssueProperties({ issue, onUpdate, inline }: IssuePropertiesProp
   };
 
   const recentAssigneeIds = useMemo(() => getRecentAssigneeIds(), [assigneeOpen]);
+  const issueProject = projects?.find((project) => project.id === issue.projectId) ?? null;
+  const issueProjectMemberAgentIds = useMemo(() => {
+    if (!issue.projectId) return null;
+    if (!projects) return [];
+    return getProjectMemberAgentIds(issueProject?.members ?? []);
+  }, [issue.projectId, issueProject, projects]);
   const sortedAgents = useMemo(
-    () => sortAgentsByRecency((agents ?? []).filter((a) => a.status !== "terminated"), recentAssigneeIds),
-    [agents, recentAssigneeIds],
+    () => sortAgentsByRecency(filterAssignableAgents(agents, issueProjectMemberAgentIds), recentAssigneeIds),
+    [agents, issueProjectMemberAgentIds, recentAssigneeIds],
   );
 
   const assignee = issue.assigneeAgentId
@@ -419,7 +430,16 @@ export function IssueProperties({ issue, onUpdate, inline }: IssuePropertiesProp
               "flex items-center gap-2 w-full px-2 py-1.5 text-xs rounded hover:bg-accent/50 whitespace-nowrap",
               p.id === issue.projectId && "bg-accent"
             )}
-            onClick={() => { onUpdate({ projectId: p.id }); setProjectOpen(false); }}
+            onClick={() => {
+              const nextProjectMemberAgentIds = getProjectMemberAgentIds(p.members ?? []);
+              onUpdate({
+                projectId: p.id,
+                ...(issue.assigneeAgentId && !isAgentAssignableToProject(issue.assigneeAgentId, nextProjectMemberAgentIds)
+                  ? { assigneeAgentId: null }
+                  : {}),
+              });
+              setProjectOpen(false);
+            }}
           >
             <span
               className="shrink-0 h-3 w-3 rounded-sm"
