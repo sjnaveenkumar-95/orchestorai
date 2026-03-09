@@ -79,13 +79,13 @@
     "timeoutMs": 120000,
     "systemPrompt": "You are Codex. Reply concisely and helpfully."
   },
-  "paperclip": {
+  "orchestorai": {
     "enabled": false,
     "apiUrl": "http://127.0.0.1:3100",
     "companyId": "company-id",
     "taskPrefix": "task:",
     "triggerMentions": [
-      "@paperclip"
+      "@orchestorai"
     ],
     "agentMappings": {
       "U0123456789": "00000000-0000-0000-0000-000000000001",

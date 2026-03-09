@@ -3,7 +3,7 @@ import express, { type Request, type Response } from "express";
 import { loadConfig } from "./config.js";
 import { parseCommandText, helpText, type ParsedCommand } from "./commands.js";
 import { FileStateStore } from "./state.js";
-import { PaperclipApiError, PaperclipClient, type PaperclipIssue } from "./paperclip.js";
+import { OrchestorAIApiError, OrchestorAIClient, type OrchestorAIIssue } from "./orchestorai.js";
 import {
   parseSlackSlashCommandPayload,
   SlackApiError,
@@ -18,7 +18,7 @@ import {
 const config = loadConfig();
 const app = express();
 const state = new FileStateStore(config.stateFile);
-const paperclip = new PaperclipClient(config.paperclipApiUrl, config.paperclipApiToken);
+const orchestorai = new OrchestorAIClient(config.orchestoraiApiUrl, config.orchestoraiApiToken);
 const slack = new SlackClient(config.slackBotToken);
 
 app.disable("x-powered-by");
@@ -29,7 +29,7 @@ function parseBearerToken(headerValue: string | undefined): string | null {
   return match?.[1]?.trim() ?? null;
 }
 
-function issueDisplay(issue: Pick<PaperclipIssue, "id" | "identifier" | "title">): string {
+function issueDisplay(issue: Pick<OrchestorAIIssue, "id" | "identifier" | "title">): string {
   const ref = issue.identifier ?? issue.id;
   return `${ref} - ${issue.title}`;
 }
@@ -84,8 +84,8 @@ async function replyInSlack(channel: string, threadTs: string, text: string): Pr
 }
 
 function explainBridgeError(error: unknown): string {
-  if (error instanceof PaperclipApiError) {
-    return `Paperclip error (${error.status}): ${error.responseBody || error.message}`;
+  if (error instanceof OrchestorAIApiError) {
+    return `OrchestorAI error (${error.status}): ${error.responseBody || error.message}`;
   }
   if (error instanceof SlackApiError) {
     return `Slack error: ${error.message}`;
@@ -100,15 +100,15 @@ async function resolveIssueForStatus(input: {
   command: Extract<ParsedCommand, { kind: "status" }>;
   channelId: string;
   threadTs: string;
-}): Promise<PaperclipIssue | null> {
+}): Promise<OrchestorAIIssue | null> {
   if (input.command.issueRef) {
-    return paperclip.getIssue(input.command.issueRef);
+    return orchestorai.getIssue(input.command.issueRef);
   }
   const link = await state.getThreadLink(input.channelId, input.threadTs);
   if (!link) {
     return null;
   }
-  return paperclip.getIssue(link.issueId);
+  return orchestorai.getIssue(link.issueId);
 }
 
 async function createIssueFromSlack(input: {
@@ -119,13 +119,13 @@ async function createIssueFromSlack(input: {
   title: string;
   description: string | null;
   companyId: string | null;
-}): Promise<PaperclipIssue> {
+}): Promise<OrchestorAIIssue> {
   const companyId = input.companyId ?? config.defaultCompanyId;
   if (!companyId) {
-    throw new Error("No Paperclip company configured. Set PAPERCLIP_DEFAULT_COMPANY_ID or use --company <company-id>.");
+    throw new Error("No OrchestorAI company configured. Set ORCHESTORAI_DEFAULT_COMPANY_ID or use --company <company-id>.");
   }
 
-  const issue = await paperclip.createIssue({
+  const issue = await orchestorai.createIssue({
     companyId,
     title: input.title,
     description: buildIssueDescription({
@@ -156,13 +156,13 @@ async function addSlackCommentToIssue(input: {
   threadTs: string;
   slackUserId: string | null;
   text: string;
-}): Promise<PaperclipIssue | null> {
+}): Promise<OrchestorAIIssue | null> {
   const link = await state.getThreadLink(input.channelId, input.threadTs);
   if (!link) {
     return null;
   }
 
-  await paperclip.addIssueComment(
+  await orchestorai.addIssueComment(
     link.issueId,
     buildCommentBody({
       text: input.text,
@@ -172,7 +172,7 @@ async function addSlackCommentToIssue(input: {
     }),
   );
 
-  return paperclip.getIssue(link.issueId);
+  return orchestorai.getIssue(link.issueId);
 }
 
 async function handleMentionEvent(event: SlackMentionEvent): Promise<void> {
@@ -201,7 +201,7 @@ async function handleMentionEvent(event: SlackMentionEvent): Promise<void> {
       await replyInSlack(
         event.channel,
         replyTarget,
-        "This thread is not linked to a Paperclip issue yet. Use `@paperclip create ...` or `@paperclip link PAP-123`.",
+        "This thread is not linked to a OrchestorAI issue yet. Use `@orchestorai create ...` or `@orchestorai link PAP-123`.",
       );
       return;
     }
@@ -209,13 +209,13 @@ async function handleMentionEvent(event: SlackMentionEvent): Promise<void> {
     await replyInSlack(
       event.channel,
       replyTarget,
-      `Linked Paperclip issue: *${issueDisplay(issue)}*\nStatus: \`${issue.status}\`\nPriority: \`${issue.priority}\``,
+      `Linked OrchestorAI issue: *${issueDisplay(issue)}*\nStatus: \`${issue.status}\`\nPriority: \`${issue.priority}\``,
     );
     return;
   }
 
   if (command.kind === "link") {
-    const issue = await paperclip.getIssue(command.issueRef);
+    const issue = await orchestorai.getIssue(command.issueRef);
     await state.upsertThreadLink({
       channelId: event.channel,
       threadTs,
@@ -227,7 +227,7 @@ async function handleMentionEvent(event: SlackMentionEvent): Promise<void> {
     await replyInSlack(
       event.channel,
       replyTarget,
-      `Linked this Slack thread to Paperclip issue *${issueDisplay(issue)}*. Mention me here to append comments.`,
+      `Linked this Slack thread to OrchestorAI issue *${issueDisplay(issue)}*. Mention me here to append comments.`,
     );
     return;
   }
@@ -244,7 +244,7 @@ async function handleMentionEvent(event: SlackMentionEvent): Promise<void> {
       await replyInSlack(
         event.channel,
         replyTarget,
-        "This thread is not linked to a Paperclip issue yet. Use `@paperclip create ...` or `@paperclip link PAP-123` first.",
+        "This thread is not linked to a OrchestorAI issue yet. Use `@orchestorai create ...` or `@orchestorai link PAP-123` first.",
       );
       return;
     }
@@ -270,7 +270,7 @@ async function handleMentionEvent(event: SlackMentionEvent): Promise<void> {
     await replyInSlack(
       event.channel,
       replyTarget,
-      `Created Paperclip issue *${issueDisplay(issue)}* and linked this thread.\nMention me in this thread to append more comments.`,
+      `Created OrchestorAI issue *${issueDisplay(issue)}* and linked this thread.\nMention me in this thread to append more comments.`,
     );
     return;
   }
@@ -279,7 +279,7 @@ async function handleMentionEvent(event: SlackMentionEvent): Promise<void> {
     await replyInSlack(
       event.channel,
       replyTarget,
-      "This thread is not linked to a Paperclip issue yet. Use `@paperclip link PAP-123` or `@paperclip create ...`.",
+      "This thread is not linked to a OrchestorAI issue yet. Use `@orchestorai link PAP-123` or `@orchestorai create ...`.",
     );
     return;
   }
@@ -300,7 +300,7 @@ async function handleSlashCommand(payload: SlackSlashCommandPayload): Promise<{
   if (command.kind !== "create" && command.kind !== "freeform") {
     return {
       response_type: "ephemeral",
-      text: "This minimal slash command only creates issues. Use `@paperclip link ...`, `@paperclip status`, or mention the bot inside a thread for comment sync.",
+      text: "This minimal slash command only creates issues. Use `@orchestorai link ...`, `@orchestorai status`, or mention the bot inside a thread for comment sync.",
     };
   }
 
@@ -319,7 +319,7 @@ async function handleSlashCommand(payload: SlackSlashCommandPayload): Promise<{
 
   const rootPost = await slack.postMessage({
     channel: payload.channelId,
-    text: `Paperclip issue *${issueDisplay(issue)}* created by <@${payload.userId}>.\nReply in this thread and mention me to sync comments.`,
+    text: `OrchestorAI issue *${issueDisplay(issue)}* created by <@${payload.userId}>.\nReply in this thread and mention me to sync comments.`,
   });
 
   await state.upsertThreadLink({
@@ -391,7 +391,7 @@ function requireOutboundAuth(req: Request, res: Response): boolean {
 
   const provided =
     parseBearerToken(req.header("authorization")) ??
-    req.header("x-paperclip-bridge-token")?.trim() ??
+    req.header("x-orchestorai-bridge-token")?.trim() ??
     null;
 
   if (provided !== config.outboundToken) {
@@ -406,7 +406,7 @@ app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
     bridge: "slack",
-    paperclipApiUrl: config.paperclipApiUrl,
+    orchestoraiApiUrl: config.orchestoraiApiUrl,
     defaultCompanyId: config.defaultCompanyId,
     stateFile: config.stateFile,
     outboundAuthEnabled: Boolean(config.outboundToken),
@@ -442,7 +442,7 @@ app.post("/slack/events", express.raw({ type: "application/json" }), async (req,
   }
 });
 
-app.post("/slack/commands/paperclip", express.raw({ type: "application/x-www-form-urlencoded" }), async (req, res) => {
+app.post("/slack/commands/orchestorai", express.raw({ type: "application/x-www-form-urlencoded" }), async (req, res) => {
   const rawBody = normalizeRawBody(req.body);
   const isValid = verifySlackSignature({
     signingSecret: config.slackSigningSecret,
@@ -471,7 +471,7 @@ app.post("/slack/commands/paperclip", express.raw({ type: "application/x-www-for
 
 app.use(express.json());
 
-app.post("/paperclip/outbound/message", async (req, res) => {
+app.post("/orchestorai/outbound/message", async (req, res) => {
   if (!requireOutboundAuth(req, res)) {
     return;
   }
@@ -486,6 +486,6 @@ app.post("/paperclip/outbound/message", async (req, res) => {
 
 app.listen(config.port, config.host, () => {
   console.log(
-    `[slack-bridge] listening on http://${config.host}:${config.port} -> ${config.paperclipApiUrl}`,
+    `[slack-bridge] listening on http://${config.host}:${config.port} -> ${config.orchestoraiApiUrl}`,
   );
 });

@@ -1,6 +1,6 @@
 # OpenClaw Adapter Modes
 
-This document describes how `@paperclipai/adapter-openclaw` selects request shape and endpoint behavior.
+This document describes how `@orchestorai/adapter-openclaw` selects request shape and endpoint behavior.
 
 ## Transport Modes
 
@@ -17,11 +17,11 @@ Configured via `adapterConfig.streamTransport` (or legacy `adapterConfig.transpo
 | --- | --- | --- |
 | `sse` | `/v1/responses` | Sends OpenResponses request with `stream: true`, expects `text/event-stream` response until terminal event. |
 | `sse` | `/hooks/*` | Rejected (`openclaw_sse_incompatible_endpoint`). Hooks are not stream-capable. |
-| `sse` | other endpoint | Sends generic streaming payload (`stream: true`, `text`, `paperclip`) and expects SSE response. |
+| `sse` | other endpoint | Sends generic streaming payload (`stream: true`, `text`, `orchestorai`) and expects SSE response. |
 | `webhook` | `/hooks/wake` | Sends wake payload `{ text, mode }`. |
 | `webhook` | `/hooks/agent` | Sends agent payload `{ message, ...hook fields }`. |
 | `webhook` | `/v1/responses` | Compatibility flow: tries `/hooks/agent` first, then falls back to original `/v1/responses` if hook endpoint returns `404`. |
-| `webhook` | other endpoint | Sends legacy generic webhook payload (`stream: false`, `text`, `paperclip`). |
+| `webhook` | other endpoint | Sends legacy generic webhook payload (`stream: false`, `text`, `orchestorai`). |
 
 ## Webhook Payload Shapes
 
@@ -31,7 +31,7 @@ Payload:
 
 ```json
 {
-  "text": "Paperclip wake event ...",
+  "text": "OrchestorAI wake event ...",
   "mode": "now"
 }
 ```
@@ -42,7 +42,7 @@ Payload:
 
 ```json
 {
-  "message": "Paperclip wake event ...",
+  "message": "OrchestorAI wake event ...",
   "name": "Optional hook name",
   "agentId": "Optional OpenClaw agent id",
   "wakeMode": "now",
@@ -72,7 +72,7 @@ When used directly (SSE mode or webhook fallback), payload uses OpenResponses sh
   "model": "openclaw",
   "input": "...",
   "metadata": {
-    "paperclip_session_key": "paperclip"
+    "orchestorai_session_key": "orchestorai"
   }
 }
 ```
@@ -92,7 +92,7 @@ You can provide auth either explicitly or via token headers:
 Session keys are resolved from:
 
 - `sessionKeyStrategy`: `fixed` (default), `issue`, `run`
-- `sessionKey`: used when strategy is `fixed` (default value `paperclip`)
+- `sessionKey`: used when strategy is `fixed` (default value `orchestorai`)
 
 Where session keys are applied:
 

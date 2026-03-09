@@ -2,25 +2,25 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AdapterExecutionContext, AdapterExecutionResult } from "@paperclipai/adapter-utils";
+import type { AdapterExecutionContext, AdapterExecutionResult } from "@orchestorai/adapter-utils";
 import {
   asString,
   asNumber,
   asBoolean,
   asStringArray,
   parseObject,
-  buildPaperclipEnv,
+  buildOrchestorAIEnv,
   redactEnvForLogs,
   ensureAbsoluteDirectory,
   ensureCommandResolvable,
   ensurePathInEnv,
   renderTemplate,
   runChildProcess,
-} from "@paperclipai/adapter-utils/server-utils";
+} from "@orchestorai/adapter-utils/server-utils";
 import { parseCodexJsonl, isCodexUnknownSessionError } from "./parse.js";
 
 const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
-const PAPERCLIP_SKILLS_CANDIDATES = [
+const ORCHESTORAI_SKILLS_CANDIDATES = [
   path.resolve(__moduleDir, "../../skills"),         // published: <pkg>/dist/server/ -> <pkg>/skills/
   path.resolve(__moduleDir, "../../../../../skills"), // dev: src/server/ -> repo root/skills/
 ];
@@ -71,8 +71,8 @@ function codexHomeDir(): string {
   return path.join(os.homedir(), ".codex");
 }
 
-async function resolvePaperclipSkillsDir(): Promise<string | null> {
-  for (const candidate of PAPERCLIP_SKILLS_CANDIDATES) {
+async function resolveOrchestorAISkillsDir(): Promise<string | null> {
+  for (const candidate of ORCHESTORAI_SKILLS_CANDIDATES) {
     const isDir = await fs.stat(candidate).then((s) => s.isDirectory()).catch(() => false);
     if (isDir) return candidate;
   }
@@ -80,7 +80,7 @@ async function resolvePaperclipSkillsDir(): Promise<string | null> {
 }
 
 async function ensureCodexSkillsInjected(onLog: AdapterExecutionContext["onLog"]) {
-  const skillsDir = await resolvePaperclipSkillsDir();
+  const skillsDir = await resolveOrchestorAISkillsDir();
   if (!skillsDir) return;
 
   const skillsHome = path.join(codexHomeDir(), "skills");
@@ -97,12 +97,12 @@ async function ensureCodexSkillsInjected(onLog: AdapterExecutionContext["onLog"]
       await fs.symlink(source, target);
       await onLog(
         "stderr",
-        `[paperclip] Injected Codex skill "${entry.name}" into ${skillsHome}\n`,
+        `[orchestorai] Injected Codex skill "${entry.name}" into ${skillsHome}\n`,
       );
     } catch (err) {
       await onLog(
         "stderr",
-        `[paperclip] Failed to inject Codex skill "${entry.name}" into ${skillsHome}: ${err instanceof Error ? err.message : String(err)}\n`,
+        `[orchestorai] Failed to inject Codex skill "${entry.name}" into ${skillsHome}: ${err instanceof Error ? err.message : String(err)}\n`,
       );
     }
   }
@@ -125,7 +125,7 @@ async function detectAgentHomeFromInstructionsFilePath(instructionsFilePath: str
   return siblingChecks.some(Boolean) ? candidate : null;
 }
 
-function renderPaperclipHeartbeatBrief(params: {
+function renderOrchestorAIHeartbeatBrief(params: {
   env: Record<string, string>;
   runId: string;
   agentHome: string | null;
@@ -142,9 +142,9 @@ function renderPaperclipHeartbeatBrief(params: {
   workspaceRepoRef: string;
 }): string {
   const lines = [
-    "Paperclip heartbeat directive:",
-    "This run was started by Paperclip. It is not a generic chat session and not a cold-start bootstrap.",
-    "Immediately follow the Paperclip heartbeat workflow using the available Paperclip API and PAPERCLIP_* environment variables.",
+    "OrchestorAI heartbeat directive:",
+    "This run was started by OrchestorAI. It is not a generic chat session and not a cold-start bootstrap.",
+    "Immediately follow the OrchestorAI heartbeat workflow using the available OrchestorAI API and ORCHESTORAI_* environment variables.",
     "Treat AGENTS.md, HEARTBEAT.md, SOUL.md, and TOOLS.md as supporting reference only. Do not stop after reading them.",
   ];
 
@@ -168,24 +168,24 @@ function renderPaperclipHeartbeatBrief(params: {
     lines.push("", "Current wake context:", ...contextLines);
   }
 
-  const paperclipKeys = Object.keys(params.env)
-    .filter((key) => key.startsWith("PAPERCLIP_"))
+  const orchestoraiKeys = Object.keys(params.env)
+    .filter((key) => key.startsWith("ORCHESTORAI_"))
     .sort();
-  if (paperclipKeys.length > 0) {
-    lines.push("", "Available Paperclip env keys:", `- ${paperclipKeys.join(", ")}`);
+  if (orchestoraiKeys.length > 0) {
+    lines.push("", "Available OrchestorAI env keys:", `- ${orchestoraiKeys.join(", ")}`);
   }
 
   lines.push("", "Execution requirements:");
-  lines.push("- Start with Paperclip identity/context and assignment handling, then checkout or respond through Paperclip before doing any other work.");
-  lines.push("- Use Paperclip APIs for identity lookup, assignment lookup, checkout, comments, and status updates.");
+  lines.push("- Start with OrchestorAI identity/context and assignment handling, then checkout or respond through OrchestorAI before doing any other work.");
+  lines.push("- Use OrchestorAI APIs for identity lookup, assignment lookup, checkout, comments, and status updates.");
   if (params.agentHome) {
-    lines.push(`- Use PAPERCLIP_AGENT_HOME=${params.agentHome} as the effective agent home for this run. If shell AGENT_HOME differs, ignore the shell value and do not spend a turn re-resolving it.`);
+    lines.push(`- Use ORCHESTORAI_AGENT_HOME=${params.agentHome} as the effective agent home for this run. If shell AGENT_HOME differs, ignore the shell value and do not spend a turn re-resolving it.`);
   }
-  lines.push("- Do not ask the user for the task again when the task is already present in Paperclip issue/context.");
+  lines.push("- Do not ask the user for the task again when the task is already present in OrchestorAI issue/context.");
   lines.push("- Never end with phrases such as 'ready for the concrete assignment', 'send the task', or 'provide the first objective'.");
 
   if (params.wakeTaskId) {
-    lines.push(`- PAPERCLIP_TASK_ID ${params.wakeTaskId} is the first priority if it is assigned to you.`);
+    lines.push(`- ORCHESTORAI_TASK_ID ${params.wakeTaskId} is the first priority if it is assigned to you.`);
   }
 
   if (params.wakeReason === "issue_assigned") {
@@ -193,7 +193,7 @@ function renderPaperclipHeartbeatBrief(params: {
     lines.push("- For this wake, do one of the following before exiting:");
     lines.push("  1. checkout the task and begin work,");
     lines.push("  2. update/comment and mark it blocked with a concrete unblock owner, or");
-    lines.push("  3. explain via a Paperclip comment or status update that a higher-priority in_progress assignment was handled first.");
+    lines.push("  3. explain via a OrchestorAI comment or status update that a higher-priority in_progress assignment was handled first.");
   } else {
     lines.push("- If no direct task context is provided, run the normal heartbeat workflow and select assigned in_progress work before todo work.");
   }
@@ -206,7 +206,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
   const promptTemplate = asString(
     config.promptTemplate,
-    "You are agent {{agent.id}} ({{agent.name}}). Continue your Paperclip work.",
+    "You are agent {{agent.id}} ({{agent.name}}). Continue your OrchestorAI work.",
   );
   const command = asString(config.command, "codex");
   const model = asString(config.model, "");
@@ -220,14 +220,14 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     asBoolean(config.dangerouslyBypassSandbox, false),
   );
 
-  const workspaceContext = parseObject(context.paperclipWorkspace);
+  const workspaceContext = parseObject(context.orchestoraiWorkspace);
   const workspaceCwd = asString(workspaceContext.cwd, "");
   const workspaceSource = asString(workspaceContext.source, "");
   const workspaceId = asString(workspaceContext.workspaceId, "");
   const workspaceRepoUrl = asString(workspaceContext.repoUrl, "");
   const workspaceRepoRef = asString(workspaceContext.repoRef, "");
-  const workspaceHints = Array.isArray(context.paperclipWorkspaces)
-    ? context.paperclipWorkspaces.filter(
+  const workspaceHints = Array.isArray(context.orchestoraiWorkspaces)
+    ? context.orchestoraiWorkspaces.filter(
         (value): value is Record<string, unknown> => typeof value === "object" && value !== null,
       )
     : [];
@@ -241,9 +241,9 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   await ensureCodexSkillsInjected(onLog);
   const envConfig = parseObject(config.env);
   const hasExplicitApiKey =
-    typeof envConfig.PAPERCLIP_API_KEY === "string" && envConfig.PAPERCLIP_API_KEY.trim().length > 0;
-  const env: Record<string, string> = { ...buildPaperclipEnv(agent) };
-  env.PAPERCLIP_RUN_ID = runId;
+    typeof envConfig.ORCHESTORAI_API_KEY === "string" && envConfig.ORCHESTORAI_API_KEY.trim().length > 0;
+  const env: Record<string, string> = { ...buildOrchestorAIEnv(agent) };
+  env.ORCHESTORAI_RUN_ID = runId;
   const wakeTaskId =
     (typeof context.taskId === "string" && context.taskId.trim().length > 0 && context.taskId.trim()) ||
     (typeof context.issueId === "string" && context.issueId.trim().length > 0 && context.issueId.trim()) ||
@@ -268,52 +268,52 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     ? context.issueIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
     : [];
   if (wakeTaskId) {
-    env.PAPERCLIP_TASK_ID = wakeTaskId;
+    env.ORCHESTORAI_TASK_ID = wakeTaskId;
   }
   if (wakeReason) {
-    env.PAPERCLIP_WAKE_REASON = wakeReason;
+    env.ORCHESTORAI_WAKE_REASON = wakeReason;
   }
   if (wakeCommentId) {
-    env.PAPERCLIP_WAKE_COMMENT_ID = wakeCommentId;
+    env.ORCHESTORAI_WAKE_COMMENT_ID = wakeCommentId;
   }
   if (approvalId) {
-    env.PAPERCLIP_APPROVAL_ID = approvalId;
+    env.ORCHESTORAI_APPROVAL_ID = approvalId;
   }
   if (approvalStatus) {
-    env.PAPERCLIP_APPROVAL_STATUS = approvalStatus;
+    env.ORCHESTORAI_APPROVAL_STATUS = approvalStatus;
   }
   if (linkedIssueIds.length > 0) {
-    env.PAPERCLIP_LINKED_ISSUE_IDS = linkedIssueIds.join(",");
+    env.ORCHESTORAI_LINKED_ISSUE_IDS = linkedIssueIds.join(",");
   }
   if (effectiveWorkspaceCwd) {
-    env.PAPERCLIP_WORKSPACE_CWD = effectiveWorkspaceCwd;
+    env.ORCHESTORAI_WORKSPACE_CWD = effectiveWorkspaceCwd;
   }
   if (workspaceSource) {
-    env.PAPERCLIP_WORKSPACE_SOURCE = workspaceSource;
+    env.ORCHESTORAI_WORKSPACE_SOURCE = workspaceSource;
   }
   if (workspaceId) {
-    env.PAPERCLIP_WORKSPACE_ID = workspaceId;
+    env.ORCHESTORAI_WORKSPACE_ID = workspaceId;
   }
   if (workspaceRepoUrl) {
-    env.PAPERCLIP_WORKSPACE_REPO_URL = workspaceRepoUrl;
+    env.ORCHESTORAI_WORKSPACE_REPO_URL = workspaceRepoUrl;
   }
   if (workspaceRepoRef) {
-    env.PAPERCLIP_WORKSPACE_REPO_REF = workspaceRepoRef;
+    env.ORCHESTORAI_WORKSPACE_REPO_REF = workspaceRepoRef;
   }
   if (workspaceHints.length > 0) {
-    env.PAPERCLIP_WORKSPACES_JSON = JSON.stringify(workspaceHints);
+    env.ORCHESTORAI_WORKSPACES_JSON = JSON.stringify(workspaceHints);
   }
   for (const [k, v] of Object.entries(envConfig)) {
     if (typeof v === "string") env[k] = v;
   }
   if (!hasExplicitApiKey && authToken) {
-    env.PAPERCLIP_API_KEY = authToken;
+    env.ORCHESTORAI_API_KEY = authToken;
   }
   const inferredAgentHome = instructionsFilePath
     ? await detectAgentHomeFromInstructionsFilePath(instructionsFilePath)
     : null;
   if (inferredAgentHome) {
-    env.PAPERCLIP_AGENT_HOME = inferredAgentHome;
+    env.ORCHESTORAI_AGENT_HOME = inferredAgentHome;
   }
   if (!nonEmptyTrimmedString(env.AGENT_HOME) && inferredAgentHome) {
     env.AGENT_HOME = inferredAgentHome;
@@ -340,7 +340,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   if (runtimeSessionId && !canResumeSession) {
     await onLog(
       "stderr",
-      `[paperclip] Codex session "${runtimeSessionId}" was saved for cwd "${runtimeSessionCwd}" and will not be resumed in "${cwd}".\n`,
+      `[orchestorai] Codex session "${runtimeSessionId}" was saved for cwd "${runtimeSessionCwd}" and will not be resumed in "${cwd}".\n`,
     );
   }
   let instructionsPrefix = "";
@@ -353,13 +353,13 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         `Resolve any relative file references from ${instructionsDir}.\n\n`;
       await onLog(
         "stderr",
-        `[paperclip] Loaded agent instructions file: ${instructionsFilePath}\n`,
+        `[orchestorai] Loaded agent instructions file: ${instructionsFilePath}\n`,
       );
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       await onLog(
         "stderr",
-        `[paperclip] Warning: could not read agent instructions file "${instructionsFilePath}": ${reason}\n`,
+        `[orchestorai] Warning: could not read agent instructions file "${instructionsFilePath}": ${reason}\n`,
       );
     }
   }
@@ -367,19 +367,19 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     if (!instructionsFilePath) return [] as string[];
     if (instructionsPrefix.length > 0) {
       return [
-        "Prepended mandatory Paperclip heartbeat brief to stdin prompt.",
+        "Prepended mandatory OrchestorAI heartbeat brief to stdin prompt.",
         `Loaded agent instructions from ${instructionsFilePath}`,
         `Prepended instructions + path directive to stdin prompt (relative references from ${instructionsDir}).`,
-        ...(inferredAgentHome ? [`Exported AGENT_HOME and PAPERCLIP_AGENT_HOME=${inferredAgentHome} from instructions file context.`] : []),
+        ...(inferredAgentHome ? [`Exported AGENT_HOME and ORCHESTORAI_AGENT_HOME=${inferredAgentHome} from instructions file context.`] : []),
       ];
     }
     return [
-      "Prepended mandatory Paperclip heartbeat brief to stdin prompt.",
+      "Prepended mandatory OrchestorAI heartbeat brief to stdin prompt.",
       `Configured instructionsFilePath ${instructionsFilePath}, but file could not be read; continuing without injected instructions.`,
-      ...(inferredAgentHome ? [`Exported AGENT_HOME and PAPERCLIP_AGENT_HOME=${inferredAgentHome} from instructions file context.`] : []),
+      ...(inferredAgentHome ? [`Exported AGENT_HOME and ORCHESTORAI_AGENT_HOME=${inferredAgentHome} from instructions file context.`] : []),
     ];
   })();
-  const heartbeatPrefix = renderPaperclipHeartbeatBrief({
+  const heartbeatPrefix = renderOrchestorAIHeartbeatBrief({
     env,
     runId,
     agentHome: inferredAgentHome,
@@ -528,7 +528,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   ) {
     await onLog(
       "stderr",
-      `[paperclip] Codex resume session "${sessionId}" is unavailable; retrying with a fresh session.\n`,
+      `[orchestorai] Codex resume session "${sessionId}" is unavailable; retrying with a fresh session.\n`,
     );
     const retry = await runAttempt(null);
     return toResult(retry, true);

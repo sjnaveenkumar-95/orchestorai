@@ -1,13 +1,13 @@
 {
-  "name": "paperclipai",
+  "name": "orchestorai",
   "version": "0.2.7",
-  "description": "Paperclip CLI — orchestrate AI agent teams to run a business",
+  "description": "OrchestorAI CLI — orchestrate AI agent teams to run a business",
   "type": "module",
   "bin": {
-    "paperclipai": "./dist/index.js"
+    "orchestorai": "./dist/index.js"
   },
   "keywords": [
-    "paperclip",
+    "orchestorai",
     "ai",
     "agents",
     "orchestration",
@@ -16,10 +16,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/paperclipai/paperclip.git",
+    "url": "https://github.com/orchestorai/orchestorai.git",
     "directory": "cli"
   },
-  "homepage": "https://github.com/paperclipai/paperclip",
+  "homepage": "https://github.com/orchestorai/orchestorai",
   "files": [
     "dist"
   ],
@@ -34,13 +34,13 @@
   },
   "dependencies": {
     "@clack/prompts": "^0.10.0",
-    "@paperclipai/adapter-claude-local": "workspace:*",
-    "@paperclipai/adapter-codex-local": "workspace:*",
-    "@paperclipai/adapter-openclaw": "workspace:*",
-    "@paperclipai/adapter-utils": "workspace:*",
-    "@paperclipai/db": "workspace:*",
-    "@paperclipai/server": "workspace:*",
-    "@paperclipai/shared": "workspace:*",
+    "@orchestorai/adapter-claude-local": "workspace:*",
+    "@orchestorai/adapter-codex-local": "workspace:*",
+    "@orchestorai/adapter-openclaw": "workspace:*",
+    "@orchestorai/adapter-utils": "workspace:*",
+    "@orchestorai/db": "workspace:*",
+    "@orchestorai/server": "workspace:*",
+    "@orchestorai/shared": "workspace:*",
     "drizzle-orm": "0.38.4",
     "dotenv": "^17.0.1",
     "commander": "^13.1.0",

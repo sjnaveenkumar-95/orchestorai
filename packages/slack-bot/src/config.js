@@ -1,10 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import dotenv from "dotenv";
-import { loadPaperclipEnvIntoProcess } from "./paperclip-env.js";
+import { loadOrchestorAIEnvIntoProcess } from "./orchestorai-env.js";
 
 dotenv.config();
-loadPaperclipEnvIntoProcess({
+loadOrchestorAIEnvIntoProcess({
   keys: [
     "SLACK_BOT_TOKEN",
     "SLACK_APP_TOKEN",
@@ -80,12 +80,12 @@ const DEFAULTS = {
     systemPrompt:
       "You are Codex. Reply concisely, accurately, and with practical software-engineering guidance.",
   },
-  paperclip: {
+  orchestorai: {
     enabled: false,
     apiUrl: "",
     companyId: "",
     taskPrefix: "task:",
-    triggerMentions: ["@paperclip"],
+    triggerMentions: ["@orchestorai"],
     agentMappings: {},
     projectMappings: {},
     syncReplies: "mention_only",
@@ -219,7 +219,7 @@ function applyEnvOverrides(config, cwd) {
 
   const slack = config.slack;
   const codex = config.codex;
-  const paperclip = config.paperclip;
+  const orchestorai = config.orchestorai;
   const runtime = config.runtime;
 
   slack.mode = normalizePolicy(env.SLACK_MODE || slack.mode, ["socket", "http"], slack.mode);
@@ -368,40 +368,40 @@ function applyEnvOverrides(config, cwd) {
   codex.timeoutMs = parseIntEnv(env.CODEX_TIMEOUT_MS, codex.timeoutMs, 1000);
   codex.systemPrompt = (env.CODEX_SYSTEM_PROMPT || codex.systemPrompt || "").trim();
 
-  paperclip.enabled = parseBool(env.PAPERCLIP_ENABLED, paperclip.enabled);
-  paperclip.apiUrl = (env.PAPERCLIP_API_URL || paperclip.apiUrl || "").trim();
-  paperclip.companyId = (env.PAPERCLIP_COMPANY_ID || paperclip.companyId || "").trim();
-  paperclip.taskPrefix = (env.PAPERCLIP_TASK_PREFIX || paperclip.taskPrefix || "task:").trim();
-  if (env.PAPERCLIP_TRIGGER_MENTIONS) {
-    paperclip.triggerMentions = parseList(env.PAPERCLIP_TRIGGER_MENTIONS);
+  orchestorai.enabled = parseBool(env.ORCHESTORAI_ENABLED, orchestorai.enabled);
+  orchestorai.apiUrl = (env.ORCHESTORAI_API_URL || orchestorai.apiUrl || "").trim();
+  orchestorai.companyId = (env.ORCHESTORAI_COMPANY_ID || orchestorai.companyId || "").trim();
+  orchestorai.taskPrefix = (env.ORCHESTORAI_TASK_PREFIX || orchestorai.taskPrefix || "task:").trim();
+  if (env.ORCHESTORAI_TRIGGER_MENTIONS) {
+    orchestorai.triggerMentions = parseList(env.ORCHESTORAI_TRIGGER_MENTIONS);
   }
-  paperclip.syncReplies = normalizePolicy(
-    env.PAPERCLIP_SYNC_REPLIES || paperclip.syncReplies,
+  orchestorai.syncReplies = normalizePolicy(
+    env.ORCHESTORAI_SYNC_REPLIES || orchestorai.syncReplies,
     ["mention_only"],
-    paperclip.syncReplies,
+    orchestorai.syncReplies,
   );
-  paperclip.notificationMode = normalizePolicy(
-    env.PAPERCLIP_NOTIFICATION_MODE || paperclip.notificationMode,
+  orchestorai.notificationMode = normalizePolicy(
+    env.ORCHESTORAI_NOTIFICATION_MODE || orchestorai.notificationMode,
     ["high_signal"],
-    paperclip.notificationMode,
+    orchestorai.notificationMode,
   );
-  const paperclipMappings = parseJsonMaybe(
-    env.PAPERCLIP_AGENT_MAPPINGS_JSON,
-    paperclip.agentMappings,
+  const orchestoraiMappings = parseJsonMaybe(
+    env.ORCHESTORAI_AGENT_MAPPINGS_JSON,
+    orchestorai.agentMappings,
   );
-  if (paperclipMappings && typeof paperclipMappings === "object" && !Array.isArray(paperclipMappings)) {
-    paperclip.agentMappings = paperclipMappings;
+  if (orchestoraiMappings && typeof orchestoraiMappings === "object" && !Array.isArray(orchestoraiMappings)) {
+    orchestorai.agentMappings = orchestoraiMappings;
   }
-  const paperclipProjectMappings = parseJsonMaybe(
-    env.PAPERCLIP_PROJECT_MAPPINGS_JSON,
-    paperclip.projectMappings,
+  const orchestoraiProjectMappings = parseJsonMaybe(
+    env.ORCHESTORAI_PROJECT_MAPPINGS_JSON,
+    orchestorai.projectMappings,
   );
   if (
-    paperclipProjectMappings &&
-    typeof paperclipProjectMappings === "object" &&
-    !Array.isArray(paperclipProjectMappings)
+    orchestoraiProjectMappings &&
+    typeof orchestoraiProjectMappings === "object" &&
+    !Array.isArray(orchestoraiProjectMappings)
   ) {
-    paperclip.projectMappings = paperclipProjectMappings;
+    orchestorai.projectMappings = orchestoraiProjectMappings;
   }
 
   runtime.logLevel = (env.LOG_LEVEL || runtime.logLevel || "info").trim().toLowerCase();
@@ -456,38 +456,38 @@ function normalizeConfig(config, cwd) {
   normalized.codex.additionalWritableDirs = Array.from(
     new Set((normalized.codex.additionalWritableDirs || []).map((entry) => path.resolve(cwd, entry))),
   );
-  normalized.paperclip.apiUrl = String(normalized.paperclip.apiUrl || "").replace(/\/+$/, "");
-  normalized.paperclip.companyId = String(normalized.paperclip.companyId || "").trim();
-  normalized.paperclip.taskPrefix = String(normalized.paperclip.taskPrefix || "task:").trim() || "task:";
-  normalized.paperclip.triggerMentions = Array.from(
+  normalized.orchestorai.apiUrl = String(normalized.orchestorai.apiUrl || "").replace(/\/+$/, "");
+  normalized.orchestorai.companyId = String(normalized.orchestorai.companyId || "").trim();
+  normalized.orchestorai.taskPrefix = String(normalized.orchestorai.taskPrefix || "task:").trim() || "task:";
+  normalized.orchestorai.triggerMentions = Array.from(
     new Set(
-      (Array.isArray(normalized.paperclip.triggerMentions)
-        ? normalized.paperclip.triggerMentions
-        : ["@paperclip"]
+      (Array.isArray(normalized.orchestorai.triggerMentions)
+        ? normalized.orchestorai.triggerMentions
+        : ["@orchestorai"]
       )
         .map((entry) => String(entry || "").trim())
         .filter(Boolean),
     ),
   );
-  normalized.paperclip.agentMappings =
-    normalized.paperclip.agentMappings &&
-    typeof normalized.paperclip.agentMappings === "object" &&
-    !Array.isArray(normalized.paperclip.agentMappings)
-      ? normalized.paperclip.agentMappings
+  normalized.orchestorai.agentMappings =
+    normalized.orchestorai.agentMappings &&
+    typeof normalized.orchestorai.agentMappings === "object" &&
+    !Array.isArray(normalized.orchestorai.agentMappings)
+      ? normalized.orchestorai.agentMappings
       : {};
-  normalized.paperclip.projectMappings =
-    normalized.paperclip.projectMappings &&
-    typeof normalized.paperclip.projectMappings === "object" &&
-    !Array.isArray(normalized.paperclip.projectMappings)
-      ? normalized.paperclip.projectMappings
+  normalized.orchestorai.projectMappings =
+    normalized.orchestorai.projectMappings &&
+    typeof normalized.orchestorai.projectMappings === "object" &&
+    !Array.isArray(normalized.orchestorai.projectMappings)
+      ? normalized.orchestorai.projectMappings
       : {};
 
-  if (normalized.paperclip.enabled) {
-    if (!normalized.paperclip.apiUrl) {
-      throw new Error("PAPERCLIP_API_URL is required when PAPERCLIP_ENABLED=true");
+  if (normalized.orchestorai.enabled) {
+    if (!normalized.orchestorai.apiUrl) {
+      throw new Error("ORCHESTORAI_API_URL is required when ORCHESTORAI_ENABLED=true");
     }
-    if (!normalized.paperclip.companyId) {
-      throw new Error("PAPERCLIP_COMPANY_ID is required when PAPERCLIP_ENABLED=true");
+    if (!normalized.orchestorai.companyId) {
+      throw new Error("ORCHESTORAI_COMPANY_ID is required when ORCHESTORAI_ENABLED=true");
     }
   }
 

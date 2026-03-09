@@ -2,31 +2,31 @@ services:
   db:
     image: postgres:17-alpine
     environment:
-      POSTGRES_USER: paperclip
-      POSTGRES_PASSWORD: paperclip
-      POSTGRES_DB: paperclip
+      POSTGRES_USER: orchestorai
+      POSTGRES_PASSWORD: orchestorai
+      POSTGRES_DB: orchestorai
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U paperclip -d paperclip"]
+      test: ["CMD-SHELL", "pg_isready -U orchestorai -d orchestorai"]
       interval: 2s
       timeout: 5s
       retries: 30
     volumes:
       - pgdata:/var/lib/postgresql/data
 
-  paperclip:
+  orchestorai:
     build:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "${PAPERCLIP_PORT:-3100}:3100"
+      - "${ORCHESTORAI_PORT:-3100}:3100"
     environment:
       HOST: "0.0.0.0"
-      DATABASE_URL: "postgres://paperclip:paperclip@db:5432/paperclip"
-      PAPERCLIP_HOME: "${PAPERCLIP_RUNTIME_HOME:-/paperclip}"
-      PAPERCLIP_SLACK_ENABLED: "${PAPERCLIP_SLACK_ENABLED:-false}"
-      PAPERCLIP_DEPLOYMENT_MODE: "${PAPERCLIP_DEPLOYMENT_MODE:-authenticated}"
-      PAPERCLIP_DEPLOYMENT_EXPOSURE: "${PAPERCLIP_DEPLOYMENT_EXPOSURE:-private}"
-      PAPERCLIP_PUBLIC_URL: "${PAPERCLIP_PUBLIC_URL:-http://localhost:3100}"
+      DATABASE_URL: "postgres://orchestorai:orchestorai@db:5432/orchestorai"
+      ORCHESTORAI_HOME: "${ORCHESTORAI_RUNTIME_HOME:-/orchestorai}"
+      ORCHESTORAI_SLACK_ENABLED: "${ORCHESTORAI_SLACK_ENABLED:-false}"
+      ORCHESTORAI_DEPLOYMENT_MODE: "${ORCHESTORAI_DEPLOYMENT_MODE:-authenticated}"
+      ORCHESTORAI_DEPLOYMENT_EXPOSURE: "${ORCHESTORAI_DEPLOYMENT_EXPOSURE:-private}"
+      ORCHESTORAI_PUBLIC_URL: "${ORCHESTORAI_PUBLIC_URL:-http://localhost:3100}"
       BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:-}"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
@@ -35,10 +35,10 @@ services:
       SLACK_APP_TOKEN: "${SLACK_APP_TOKEN:-}"
       SLACK_SIGNING_SECRET: "${SLACK_SIGNING_SECRET:-}"
       SLACK_APP_ID: "${SLACK_APP_ID:-}"
-      PAPERCLIP_COMPANY_ID: "${PAPERCLIP_COMPANY_ID:-}"
-      PAPERCLIP_TRIGGER_MENTIONS: "${PAPERCLIP_TRIGGER_MENTIONS:-@paperclip}"
-      PAPERCLIP_AGENT_MAPPINGS_JSON: "${PAPERCLIP_AGENT_MAPPINGS_JSON:-{}}"
-      PAPERCLIP_PROJECT_MAPPINGS_JSON: "${PAPERCLIP_PROJECT_MAPPINGS_JSON:-{}}"
+      ORCHESTORAI_COMPANY_ID: "${ORCHESTORAI_COMPANY_ID:-}"
+      ORCHESTORAI_TRIGGER_MENTIONS: "${ORCHESTORAI_TRIGGER_MENTIONS:-@orchestorai}"
+      ORCHESTORAI_AGENT_MAPPINGS_JSON: "${ORCHESTORAI_AGENT_MAPPINGS_JSON:-{}}"
+      ORCHESTORAI_PROJECT_MAPPINGS_JSON: "${ORCHESTORAI_PROJECT_MAPPINGS_JSON:-{}}"
       CODEX_MODEL: "${CODEX_MODEL:-gpt-5.3-codex}"
       CODEX_PROFILE: "${CODEX_PROFILE:-}"
       CODEX_SANDBOX: "${CODEX_SANDBOX:-workspace-write}"
@@ -46,7 +46,7 @@ services:
       CODEX_TIMEOUT_MS: "${CODEX_TIMEOUT_MS:-1800000}"
       CODEX_SYSTEM_PROMPT: "${CODEX_SYSTEM_PROMPT:-You are Codex. Reply concisely and helpfully.}"
     volumes:
-      - "${PAPERCLIP_DATA_DIR:-./data/docker-paperclip-stack}:${PAPERCLIP_RUNTIME_HOME:-/paperclip}"
+      - "${ORCHESTORAI_DATA_DIR:-./data/docker-orchestorai-stack}:${ORCHESTORAI_RUNTIME_HOME:-/orchestorai}"
     depends_on:
       db:
         condition: service_healthy

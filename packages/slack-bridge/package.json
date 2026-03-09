@@ -1,5 +1,5 @@
 {
-  "name": "@paperclipai/slack-bridge",
+  "name": "@orchestorai/slack-bridge",
   "version": "0.0.1",
   "private": true,
   "type": "module",

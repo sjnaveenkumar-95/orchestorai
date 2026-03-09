@@ -24,37 +24,37 @@ FROM base AS build
 WORKDIR /app
 COPY --from=deps /app /app
 COPY . .
-RUN pnpm --filter @paperclipai/ui build
-RUN pnpm --filter @paperclipai/server build
-RUN pnpm --filter @paperclipai/slack-bot check
+RUN pnpm --filter @orchestorai/ui build
+RUN pnpm --filter @orchestorai/server build
+RUN pnpm --filter @orchestorai/slack-bot check
 RUN test -f server/dist/index.js || (echo "ERROR: server build output missing" && exit 1)
 
 FROM base AS production
 WORKDIR /app
 COPY --from=build /app /app
 RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest
-RUN useradd --create-home --home-dir /paperclip --shell /bin/bash paperclip \
-  && mkdir -p /paperclip \
-  && chown -R paperclip:paperclip /paperclip /app
+RUN useradd --create-home --home-dir /orchestorai --shell /bin/bash orchestorai \
+  && mkdir -p /orchestorai \
+  && chown -R orchestorai:orchestorai /orchestorai /app
 
 ENV NODE_ENV=production \
-  HOME=/paperclip \
+  HOME=/orchestorai \
   HOST=0.0.0.0 \
   PORT=3100 \
   SLACK_PORT=3000 \
   SERVE_UI=true \
-  PAPERCLIP_HOME=/paperclip \
-  PAPERCLIP_INSTANCE_ID=default \
-  PAPERCLIP_CONFIG=/paperclip/instances/default/config.json \
-  PAPERCLIP_DEPLOYMENT_MODE=authenticated \
-  PAPERCLIP_DEPLOYMENT_EXPOSURE=private \
-  PAPERCLIP_API_URL=http://127.0.0.1:3100 \
-  PAPERCLIP_SLACK_ENABLED=false \
+  ORCHESTORAI_HOME=/orchestorai \
+  ORCHESTORAI_INSTANCE_ID=default \
+  ORCHESTORAI_CONFIG=/orchestorai/instances/default/config.json \
+  ORCHESTORAI_DEPLOYMENT_MODE=authenticated \
+  ORCHESTORAI_DEPLOYMENT_EXPOSURE=private \
+  ORCHESTORAI_API_URL=http://127.0.0.1:3100 \
+  ORCHESTORAI_SLACK_ENABLED=false \
   CODEX_WORKDIR=/app \
-  DATA_DIR=/paperclip/slack-bot/data
+  DATA_DIR=/orchestorai/slack-bot/data
 
-VOLUME ["/paperclip"]
-USER paperclip
+VOLUME ["/orchestorai"]
+USER orchestorai
 EXPOSE 3100
 
 CMD ["node", "scripts/run-stack.mjs", "production"]

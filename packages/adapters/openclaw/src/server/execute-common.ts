@@ -1,5 +1,5 @@
-import type { AdapterExecutionContext } from "@paperclipai/adapter-utils";
-import { asNumber, asString, buildPaperclipEnv, parseObject } from "@paperclipai/adapter-utils/server-utils";
+import type { AdapterExecutionContext } from "@orchestorai/adapter-utils";
+import { asNumber, asString, buildOrchestorAIEnv, parseObject } from "@orchestorai/adapter-utils/server-utils";
 import { createHash } from "node:crypto";
 import { parseOpenClawResponse } from "./parse.js";
 
@@ -27,7 +27,7 @@ export type OpenClawExecutionState = {
   payloadTemplate: Record<string, unknown>;
   wakePayload: WakePayload;
   sessionKey: string;
-  paperclipEnv: Record<string, string>;
+  orchestoraiEnv: Record<string, string>;
   wakeText: string;
 };
 
@@ -44,7 +44,7 @@ export function toAuthorizationHeaderValue(rawToken: string): string {
   return /^bearer\s+/i.test(trimmed) ? trimmed : `Bearer ${trimmed}`;
 }
 
-export function resolvePaperclipApiUrlOverride(value: unknown): string | null {
+export function resolveOrchestorAIApiUrlOverride(value: unknown): string | null {
   const raw = nonEmpty(value);
   if (!raw) return null;
   try {
@@ -68,9 +68,9 @@ export function resolveSessionKey(input: {
   runId: string;
   issueId: string | null;
 }): string {
-  const fallback = input.configuredSessionKey ?? "paperclip";
-  if (input.strategy === "run") return `paperclip:run:${input.runId}`;
-  if (input.strategy === "issue" && input.issueId) return `paperclip:issue:${input.issueId}`;
+  const fallback = input.configuredSessionKey ?? "orchestorai";
+  if (input.strategy === "run") return `orchestorai:run:${input.runId}`;
+  if (input.strategy === "issue" && input.issueId) return `orchestorai:issue:${input.issueId}`;
   return fallback;
 }
 
@@ -246,58 +246,58 @@ export function buildWakePayload(ctx: AdapterExecutionContext): WakePayload {
   };
 }
 
-export function buildPaperclipEnvForWake(ctx: AdapterExecutionContext, wakePayload: WakePayload): Record<string, string> {
-  const paperclipApiUrlOverride = resolvePaperclipApiUrlOverride(ctx.config.paperclipApiUrl);
-  const paperclipEnv: Record<string, string> = {
-    ...buildPaperclipEnv(ctx.agent),
-    PAPERCLIP_RUN_ID: ctx.runId,
+export function buildOrchestorAIEnvForWake(ctx: AdapterExecutionContext, wakePayload: WakePayload): Record<string, string> {
+  const orchestoraiApiUrlOverride = resolveOrchestorAIApiUrlOverride(ctx.config.orchestoraiApiUrl);
+  const orchestoraiEnv: Record<string, string> = {
+    ...buildOrchestorAIEnv(ctx.agent),
+    ORCHESTORAI_RUN_ID: ctx.runId,
   };
 
-  if (paperclipApiUrlOverride) {
-    paperclipEnv.PAPERCLIP_API_URL = paperclipApiUrlOverride;
+  if (orchestoraiApiUrlOverride) {
+    orchestoraiEnv.ORCHESTORAI_API_URL = orchestoraiApiUrlOverride;
   }
-  if (wakePayload.taskId) paperclipEnv.PAPERCLIP_TASK_ID = wakePayload.taskId;
-  if (wakePayload.wakeReason) paperclipEnv.PAPERCLIP_WAKE_REASON = wakePayload.wakeReason;
-  if (wakePayload.wakeCommentId) paperclipEnv.PAPERCLIP_WAKE_COMMENT_ID = wakePayload.wakeCommentId;
-  if (wakePayload.approvalId) paperclipEnv.PAPERCLIP_APPROVAL_ID = wakePayload.approvalId;
-  if (wakePayload.approvalStatus) paperclipEnv.PAPERCLIP_APPROVAL_STATUS = wakePayload.approvalStatus;
+  if (wakePayload.taskId) orchestoraiEnv.ORCHESTORAI_TASK_ID = wakePayload.taskId;
+  if (wakePayload.wakeReason) orchestoraiEnv.ORCHESTORAI_WAKE_REASON = wakePayload.wakeReason;
+  if (wakePayload.wakeCommentId) orchestoraiEnv.ORCHESTORAI_WAKE_COMMENT_ID = wakePayload.wakeCommentId;
+  if (wakePayload.approvalId) orchestoraiEnv.ORCHESTORAI_APPROVAL_ID = wakePayload.approvalId;
+  if (wakePayload.approvalStatus) orchestoraiEnv.ORCHESTORAI_APPROVAL_STATUS = wakePayload.approvalStatus;
   if (wakePayload.issueIds.length > 0) {
-    paperclipEnv.PAPERCLIP_LINKED_ISSUE_IDS = wakePayload.issueIds.join(",");
+    orchestoraiEnv.ORCHESTORAI_LINKED_ISSUE_IDS = wakePayload.issueIds.join(",");
   }
 
-  return paperclipEnv;
+  return orchestoraiEnv;
 }
 
-export function buildWakeText(payload: WakePayload, paperclipEnv: Record<string, string>): string {
-  const claimedApiKeyPath = "~/.openclaw/workspace/paperclip-claimed-api-key.json";
+export function buildWakeText(payload: WakePayload, orchestoraiEnv: Record<string, string>): string {
+  const claimedApiKeyPath = "~/.openclaw/workspace/orchestorai-claimed-api-key.json";
   const orderedKeys = [
-    "PAPERCLIP_RUN_ID",
-    "PAPERCLIP_AGENT_ID",
-    "PAPERCLIP_COMPANY_ID",
-    "PAPERCLIP_API_URL",
-    "PAPERCLIP_TASK_ID",
-    "PAPERCLIP_WAKE_REASON",
-    "PAPERCLIP_WAKE_COMMENT_ID",
-    "PAPERCLIP_APPROVAL_ID",
-    "PAPERCLIP_APPROVAL_STATUS",
-    "PAPERCLIP_LINKED_ISSUE_IDS",
+    "ORCHESTORAI_RUN_ID",
+    "ORCHESTORAI_AGENT_ID",
+    "ORCHESTORAI_COMPANY_ID",
+    "ORCHESTORAI_API_URL",
+    "ORCHESTORAI_TASK_ID",
+    "ORCHESTORAI_WAKE_REASON",
+    "ORCHESTORAI_WAKE_COMMENT_ID",
+    "ORCHESTORAI_APPROVAL_ID",
+    "ORCHESTORAI_APPROVAL_STATUS",
+    "ORCHESTORAI_LINKED_ISSUE_IDS",
   ];
 
   const envLines: string[] = [];
   for (const key of orderedKeys) {
-    const value = paperclipEnv[key];
+    const value = orchestoraiEnv[key];
     if (!value) continue;
     envLines.push(`${key}=${value}`);
   }
 
   const lines = [
-    "Paperclip wake event for a cloud adapter.",
+    "OrchestorAI wake event for a cloud adapter.",
     "",
     "Set these values in your run context:",
     ...envLines,
-    `PAPERCLIP_API_KEY=<token from ${claimedApiKeyPath}>`,
+    `ORCHESTORAI_API_KEY=<token from ${claimedApiKeyPath}>`,
     "",
-    `Load PAPERCLIP_API_KEY from ${claimedApiKeyPath} (the token you saved after claim-api-key).`,
+    `Load ORCHESTORAI_API_KEY from ${claimedApiKeyPath} (the token you saved after claim-api-key).`,
     "",
     `task_id=${payload.taskId ?? ""}`,
     `issue_id=${payload.issueId ?? ""}`,
@@ -308,7 +308,7 @@ export function buildWakeText(payload: WakePayload, paperclipEnv: Record<string,
     `linked_issue_ids=${payload.issueIds.join(",")}`,
   ];
 
-  lines.push("", "Run your Paperclip heartbeat procedure now.");
+  lines.push("", "Run your OrchestorAI heartbeat procedure now.");
   return lines.join("\n");
 }
 
@@ -480,8 +480,8 @@ export function buildExecutionState(ctx: AdapterExecutionContext): OpenClawExecu
     issueId: wakePayload.issueId ?? wakePayload.taskId,
   });
 
-  const paperclipEnv = buildPaperclipEnvForWake(ctx, wakePayload);
-  const wakeText = buildWakeText(wakePayload, paperclipEnv);
+  const orchestoraiEnv = buildOrchestorAIEnvForWake(ctx, wakePayload);
+  const wakeText = buildWakeText(wakePayload, orchestoraiEnv);
 
   return {
     method,
@@ -490,7 +490,7 @@ export function buildExecutionState(ctx: AdapterExecutionContext): OpenClawExecu
     payloadTemplate,
     wakePayload,
     sessionKey,
-    paperclipEnv,
+    orchestoraiEnv,
     wakeText,
   };
 }

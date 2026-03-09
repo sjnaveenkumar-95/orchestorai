@@ -1,4 +1,4 @@
-export interface PaperclipIssue {
+export interface OrchestorAIIssue {
   id: string;
   identifier: string | null;
   title: string;
@@ -7,24 +7,24 @@ export interface PaperclipIssue {
   priority: string;
 }
 
-export interface PaperclipIssueComment {
+export interface OrchestorAIIssueComment {
   id: string;
   issueId: string;
   body: string;
 }
 
-export class PaperclipApiError extends Error {
+export class OrchestorAIApiError extends Error {
   constructor(
     message: string,
     public readonly status: number,
     public readonly responseBody: string,
   ) {
     super(message);
-    this.name = "PaperclipApiError";
+    this.name = "OrchestorAIApiError";
   }
 }
 
-export class PaperclipClient {
+export class OrchestorAIClient {
   constructor(
     private readonly baseUrl: string,
     private readonly token: string | null,
@@ -47,8 +47,8 @@ export class PaperclipClient {
 
     if (!response.ok) {
       const responseBody = await response.text();
-      throw new PaperclipApiError(
-        `Paperclip API request failed: ${method} ${route} -> ${response.status}`,
+      throw new OrchestorAIApiError(
+        `OrchestorAI API request failed: ${method} ${route} -> ${response.status}`,
         response.status,
         responseBody,
       );
@@ -57,23 +57,23 @@ export class PaperclipClient {
     return (await response.json()) as T;
   }
 
-  getIssue(issueRef: string): Promise<PaperclipIssue> {
-    return this.request<PaperclipIssue>("GET", `/issues/${encodeURIComponent(issueRef)}`);
+  getIssue(issueRef: string): Promise<OrchestorAIIssue> {
+    return this.request<OrchestorAIIssue>("GET", `/issues/${encodeURIComponent(issueRef)}`);
   }
 
   createIssue(input: {
     companyId: string;
     title: string;
     description: string | null;
-  }): Promise<PaperclipIssue> {
-    return this.request<PaperclipIssue>("POST", `/companies/${input.companyId}/issues`, {
+  }): Promise<OrchestorAIIssue> {
+    return this.request<OrchestorAIIssue>("POST", `/companies/${input.companyId}/issues`, {
       title: input.title,
       description: input.description,
     });
   }
 
-  addIssueComment(issueId: string, body: string): Promise<PaperclipIssueComment> {
-    return this.request<PaperclipIssueComment>("POST", `/issues/${encodeURIComponent(issueId)}/comments`, {
+  addIssueComment(issueId: string, body: string): Promise<OrchestorAIIssueComment> {
+    return this.request<OrchestorAIIssueComment>("POST", `/issues/${encodeURIComponent(issueId)}/comments`, {
       body,
     });
   }

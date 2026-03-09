@@ -1,11 +1,11 @@
 ---
 title: Available APIs
-summary: Source-derived HTTP endpoint inventory for the current Paperclip server
+summary: Source-derived HTTP endpoint inventory for the current OrchestorAI server
 ---
 
 # Available APIs
 
-This file is a source-derived index of the HTTP endpoints mounted by [app.ts](/Users/naveenkumar/Workspace/AI/AGI/paperclip/server/src/app.ts) and [server/src/routes](/Users/naveenkumar/Workspace/AI/AGI/paperclip/server/src/routes).
+This file is a source-derived index of the HTTP endpoints mounted by [app.ts](/Users/naveenkumar/Workspace/AI/AGI/orchestorai/server/src/app.ts) and [server/src/routes](/Users/naveenkumar/Workspace/AI/AGI/orchestorai/server/src/routes).
 
 Base URLs:
 
@@ -14,7 +14,7 @@ Base URLs:
 - Generic API prefix in code/docs: `/api`
 - LLM reflection endpoints are mounted under `/llms` and are not prefixed with `/api`
 
-This is an endpoint index, not a full schema reference. For request/response details, see the existing docs under [docs/api](/Users/naveenkumar/Workspace/AI/AGI/paperclip/docs/api).
+This is an endpoint index, not a full schema reference. For request/response details, see the existing docs under [docs/api](/Users/naveenkumar/Workspace/AI/AGI/orchestorai/docs/api).
 
 ## Authentication and Session
 
@@ -203,6 +203,6 @@ This is an endpoint index, not a full schema reference. For request/response det
 
 ## Source Notes
 
-- Route mount points: [app.ts](/Users/naveenkumar/Workspace/AI/AGI/paperclip/server/src/app.ts)
-- Route implementations: [server/src/routes](/Users/naveenkumar/Workspace/AI/AGI/paperclip/server/src/routes)
-- Existing prose docs: [docs/api](/Users/naveenkumar/Workspace/AI/AGI/paperclip/docs/api)
+- Route mount points: [app.ts](/Users/naveenkumar/Workspace/AI/AGI/orchestorai/server/src/app.ts)
+- Route implementations: [server/src/routes](/Users/naveenkumar/Workspace/AI/AGI/orchestorai/server/src/routes)
+- Existing prose docs: [docs/api](/Users/naveenkumar/Workspace/AI/AGI/orchestorai/docs/api)

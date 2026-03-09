@@ -1,5 +1,5 @@
 {
-  "name": "@paperclipai/shared",
+  "name": "@orchestorai/shared",
   "version": "0.2.7",
   "type": "module",
   "exports": {

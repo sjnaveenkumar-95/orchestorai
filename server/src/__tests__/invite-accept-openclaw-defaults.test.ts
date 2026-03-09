@@ -7,13 +7,13 @@ describe("buildJoinDefaultsPayloadForAccept", () => {
       adapterType: "openclaw",
       defaultsPayload: null,
       responsesWebhookUrl: "http://localhost:18789/v1/responses",
-      paperclipApiUrl: "http://host.docker.internal:3100",
+      orchestoraiApiUrl: "http://host.docker.internal:3100",
       inboundOpenClawAuthHeader: "gateway-token",
     }) as Record<string, unknown>;
 
     expect(result).toMatchObject({
       url: "http://localhost:18789/v1/responses",
-      paperclipApiUrl: "http://host.docker.internal:3100",
+      orchestoraiApiUrl: "http://host.docker.internal:3100",
       webhookAuthHeader: "Bearer gateway-token",
       headers: {
         "x-openclaw-auth": "gateway-token",
@@ -30,18 +30,18 @@ describe("buildJoinDefaultsPayloadForAccept", () => {
         headers: {
           "x-openclaw-auth": "existing-token",
         },
-        paperclipApiUrl: "https://paperclip.example.com",
+        orchestoraiApiUrl: "https://orchestorai.example.com",
       },
       responsesWebhookUrl: "https://legacy.example.com/v1/responses",
       responsesWebhookMethod: "PUT",
-      paperclipApiUrl: "https://legacy-paperclip.example.com",
+      orchestoraiApiUrl: "https://legacy-orchestorai.example.com",
       inboundOpenClawAuthHeader: "legacy-token",
     }) as Record<string, unknown>;
 
     expect(result).toMatchObject({
       url: "https://example.com/v1/responses",
       method: "POST",
-      paperclipApiUrl: "https://paperclip.example.com",
+      orchestoraiApiUrl: "https://orchestorai.example.com",
       webhookAuthHeader: "Bearer existing-token",
       headers: {
         "x-openclaw-auth": "existing-token",

@@ -1,4 +1,4 @@
-# @paperclipai/shared
+# @orchestorai/shared
 
 ## 0.2.7
 

@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { Router } from "express";
-import type { Db } from "@paperclipai/db";
+import type { Db } from "@orchestorai/db";
 import { slackIntegrationService } from "../services/index.js";
 import { logger } from "../middleware/logger.js";
 import { createInstanceSettingsService } from "../services/instance-settings.js";

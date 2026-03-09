@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-const DISMISSED_KEY = "paperclip:inbox:dismissed";
-const DISMISSED_EVENT = "paperclip:inbox:dismissed-updated";
+const DISMISSED_KEY = "orchestorai:inbox:dismissed";
+const DISMISSED_EVENT = "orchestorai:inbox:dismissed-updated";
 const SIDEBAR_DISMISS_PREFIXES = ["run:", "stale:", "alert:"];
 
 function readDismissedValues(): string[] {

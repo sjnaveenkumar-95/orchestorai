@@ -1,4 +1,4 @@
-import type { AdapterExecutionContext, AdapterExecutionResult } from "@paperclipai/adapter-utils";
+import type { AdapterExecutionContext, AdapterExecutionResult } from "@orchestorai/adapter-utils";
 import {
   appendWakeTextToOpenResponsesInput,
   buildExecutionState,
@@ -275,8 +275,8 @@ function buildSseBody(input: {
       input: openResponsesInput,
       metadata: {
         ...toStringRecord(state.payloadTemplate.metadata),
-        ...state.paperclipEnv,
-        paperclip_session_key: state.sessionKey,
+        ...state.orchestoraiEnv,
+        orchestorai_session_key: state.sessionKey,
       },
     }
     : {
@@ -284,11 +284,11 @@ function buildSseBody(input: {
       stream: true,
       sessionKey: state.sessionKey,
       text: payloadText,
-      paperclip: {
+      orchestorai: {
         ...state.wakePayload,
         sessionKey: state.sessionKey,
         streamTransport: "sse",
-        env: state.paperclipEnv,
+        env: state.orchestoraiEnv,
         context,
       },
     };

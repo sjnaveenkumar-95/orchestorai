@@ -30,7 +30,7 @@ import {
   GitBranch,
   Users,
 } from "lucide-react";
-import { PROJECT_COLORS } from "@paperclipai/shared";
+import { PROJECT_COLORS } from "@orchestorai/shared";
 import { cn, projectUrl } from "../lib/utils";
 import { formatProjectReferenceAlias } from "../lib/reference-aliases";
 import { MarkdownEditor, type MarkdownEditorRef } from "./MarkdownEditor";
@@ -47,7 +47,7 @@ const projectStatuses = [
 ];
 
 type WorkspaceSetup = "none" | "local" | "repo" | "both";
-const REPO_ONLY_CWD_SENTINEL = "/__paperclip_repo_only__";
+const REPO_ONLY_CWD_SENTINEL = "/__orchestorai_repo_only__";
 
 export function NewProjectDialog() {
   const { newProjectOpen, closeNewProject } = useDialog();

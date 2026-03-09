@@ -5,13 +5,13 @@ import { fileURLToPath } from "node:url";
 import { Router } from "express";
 import type { Request } from "express";
 import { and, eq, isNull, desc } from "drizzle-orm";
-import type { Db } from "@paperclipai/db";
+import type { Db } from "@orchestorai/db";
 import {
   agentApiKeys,
   authUsers,
   invites,
   joinRequests
-} from "@paperclipai/db";
+} from "@orchestorai/db";
 import {
   acceptInviteSchema,
   claimJoinRequestApiKeySchema,
@@ -20,8 +20,8 @@ import {
   updateMemberPermissionsSchema,
   updateUserCompanyAccessSchema,
   PERMISSION_KEYS
-} from "@paperclipai/shared";
-import type { DeploymentExposure, DeploymentMode } from "@paperclipai/shared";
+} from "@orchestorai/shared";
+import type { DeploymentExposure, DeploymentMode } from "@orchestorai/shared";
 import {
   forbidden,
   conflict,
@@ -91,7 +91,7 @@ function requestBaseUrl(req: Request) {
 
 function readSkillMarkdown(skillName: string): string | null {
   const normalized = skillName.trim().toLowerCase();
-  if (normalized !== "paperclip" && normalized !== "paperclip-create-agent")
+  if (normalized !== "orchestorai" && normalized !== "orchestorai-create-agent")
     return null;
   const moduleDir = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
@@ -317,7 +317,7 @@ export function buildJoinDefaultsPayloadForAccept(input: {
   responsesWebhookUrl?: unknown;
   responsesWebhookMethod?: unknown;
   responsesWebhookHeaders?: unknown;
-  paperclipApiUrl?: unknown;
+  orchestoraiApiUrl?: unknown;
   webhookAuthHeader?: unknown;
   inboundOpenClawAuthHeader?: string | null;
   inboundOpenClawTokenHeader?: string | null;
@@ -340,9 +340,9 @@ export function buildJoinDefaultsPayloadForAccept(input: {
     if (legacyMethod) merged.method = legacyMethod.toUpperCase();
   }
 
-  if (!nonEmptyTrimmedString(merged.paperclipApiUrl)) {
-    const legacyPaperclipApiUrl = nonEmptyTrimmedString(input.paperclipApiUrl);
-    if (legacyPaperclipApiUrl) merged.paperclipApiUrl = legacyPaperclipApiUrl;
+  if (!nonEmptyTrimmedString(merged.orchestoraiApiUrl)) {
+    const legacyOrchestorAIApiUrl = nonEmptyTrimmedString(input.orchestoraiApiUrl);
+    if (legacyOrchestorAIApiUrl) merged.orchestoraiApiUrl = legacyOrchestorAIApiUrl;
   }
 
   if (!nonEmptyTrimmedString(merged.webhookAuthHeader)) {
@@ -505,8 +505,8 @@ function summarizeOpenClawDefaultsForLog(defaultsPayload: unknown) {
     keys: defaults ? Object.keys(defaults).sort() : [],
     url: defaults ? nonEmptyTrimmedString(defaults.url) : null,
     method: defaults ? nonEmptyTrimmedString(defaults.method) : null,
-    paperclipApiUrl: defaults
-      ? nonEmptyTrimmedString(defaults.paperclipApiUrl)
+    orchestoraiApiUrl: defaults
+      ? nonEmptyTrimmedString(defaults.orchestoraiApiUrl)
       : null,
     headerKeys: headers ? Object.keys(headers).sort() : [],
     webhookAuthHeader: defaults
@@ -549,7 +549,7 @@ function buildJoinConnectivityDiagnostics(input: {
         code: "openclaw_private_bind_loopback",
         level: "warn",
         message:
-          "Paperclip is bound to loopback in authenticated/private mode.",
+          "OrchestorAI is bound to loopback in authenticated/private mode.",
         hint: "Bind to a reachable private hostname/IP for remote OpenClaw callbacks."
       });
     }
@@ -557,8 +557,8 @@ function buildJoinConnectivityDiagnostics(input: {
       diagnostics.push({
         code: "openclaw_private_bind_not_allowed",
         level: "warn",
-        message: `Paperclip bind host \"${bindHost}\" is not in allowed hostnames.`,
-        hint: `Run pnpm paperclipai allowed-hostname ${bindHost}`
+        message: `OrchestorAI bind host \"${bindHost}\" is not in allowed hostnames.`,
+        hint: `Run pnpm orchestorai allowed-hostname ${bindHost}`
       });
     }
     if (callbackHost && !isLoopbackHost(callbackHost) && allowSet.size === 0) {
@@ -567,7 +567,7 @@ function buildJoinConnectivityDiagnostics(input: {
         level: "warn",
         message:
           "No explicit allowed hostnames are configured for authenticated/private mode.",
-        hint: "Set one with pnpm paperclipai allowed-hostname <host> when OpenClaw runs off-host."
+        hint: "Set one with pnpm orchestorai allowed-hostname <host> when OpenClaw runs off-host."
       });
     }
   }
@@ -611,7 +611,7 @@ function normalizeAgentDefaultsForJoin(input: {
       level: "warn",
       message:
         "No OpenClaw callback config was provided in agentDefaultsPayload.",
-      hint: "Include agentDefaultsPayload.url so Paperclip can invoke the OpenClaw endpoint immediately after approval."
+      hint: "Include agentDefaultsPayload.url so OrchestorAI can invoke the OpenClaw endpoint immediately after approval."
     });
     return { normalized: null as Record<string, unknown> | null, diagnostics };
   }
@@ -738,44 +738,44 @@ function normalizeAgentDefaultsForJoin(input: {
     normalized.payloadTemplate = defaults.payloadTemplate;
   }
 
-  const rawPaperclipApiUrl =
-    typeof defaults.paperclipApiUrl === "string"
-      ? defaults.paperclipApiUrl.trim()
+  const rawOrchestorAIApiUrl =
+    typeof defaults.orchestoraiApiUrl === "string"
+      ? defaults.orchestoraiApiUrl.trim()
       : "";
-  if (rawPaperclipApiUrl) {
+  if (rawOrchestorAIApiUrl) {
     try {
-      const parsedPaperclipApiUrl = new URL(rawPaperclipApiUrl);
+      const parsedOrchestorAIApiUrl = new URL(rawOrchestorAIApiUrl);
       if (
-        parsedPaperclipApiUrl.protocol !== "http:" &&
-        parsedPaperclipApiUrl.protocol !== "https:"
+        parsedOrchestorAIApiUrl.protocol !== "http:" &&
+        parsedOrchestorAIApiUrl.protocol !== "https:"
       ) {
         diagnostics.push({
-          code: "openclaw_paperclip_api_url_protocol",
+          code: "openclaw_orchestorai_api_url_protocol",
           level: "warn",
-          message: `paperclipApiUrl must use http:// or https:// (got ${parsedPaperclipApiUrl.protocol}).`
+          message: `orchestoraiApiUrl must use http:// or https:// (got ${parsedOrchestorAIApiUrl.protocol}).`
         });
       } else {
-        normalized.paperclipApiUrl = parsedPaperclipApiUrl.toString();
+        normalized.orchestoraiApiUrl = parsedOrchestorAIApiUrl.toString();
         diagnostics.push({
-          code: "openclaw_paperclip_api_url_configured",
+          code: "openclaw_orchestorai_api_url_configured",
           level: "info",
-          message: `paperclipApiUrl set to ${parsedPaperclipApiUrl.toString()}`
+          message: `orchestoraiApiUrl set to ${parsedOrchestorAIApiUrl.toString()}`
         });
-        if (isLoopbackHost(parsedPaperclipApiUrl.hostname)) {
+        if (isLoopbackHost(parsedOrchestorAIApiUrl.hostname)) {
           diagnostics.push({
-            code: "openclaw_paperclip_api_url_loopback",
+            code: "openclaw_orchestorai_api_url_loopback",
             level: "warn",
             message:
-              "paperclipApiUrl uses loopback hostname. Remote OpenClaw workers cannot reach localhost on the Paperclip host.",
+              "orchestoraiApiUrl uses loopback hostname. Remote OpenClaw workers cannot reach localhost on the OrchestorAI host.",
             hint: "Use a reachable hostname/IP and keep it in allowed hostnames for authenticated/private deployments."
           });
         }
       }
     } catch {
       diagnostics.push({
-        code: "openclaw_paperclip_api_url_invalid",
+        code: "openclaw_orchestorai_api_url_invalid",
         level: "warn",
-        message: `Invalid paperclipApiUrl: ${rawPaperclipApiUrl}`
+        message: `Invalid orchestoraiApiUrl: ${rawOrchestorAIApiUrl}`
       });
     }
   }
@@ -851,7 +851,7 @@ function buildOnboardingDiscoveryDiagnostics(input: {
       code: "openclaw_onboarding_api_loopback",
       level: "warn",
       message:
-        "Onboarding URL resolves to loopback hostname. Remote OpenClaw agents cannot reach localhost on your Paperclip host.",
+        "Onboarding URL resolves to loopback hostname. Remote OpenClaw agents cannot reach localhost on your OrchestorAI host.",
       hint: "Use a reachable hostname/IP (for example Tailscale hostname, Docker host alias, or public domain)."
     });
   }
@@ -864,7 +864,7 @@ function buildOnboardingDiscoveryDiagnostics(input: {
     diagnostics.push({
       code: "openclaw_onboarding_private_loopback_bind",
       level: "warn",
-      message: "Paperclip is bound to loopback in authenticated/private mode.",
+      message: "OrchestorAI is bound to loopback in authenticated/private mode.",
       hint: "Run with a reachable bind host or use pnpm dev --tailscale-auth for private-network onboarding."
     });
   }
@@ -881,7 +881,7 @@ function buildOnboardingDiscoveryDiagnostics(input: {
       code: "openclaw_onboarding_private_host_not_allowed",
       level: "warn",
       message: `Onboarding host "${apiHost}" is not in allowed hostnames for authenticated/private mode.`,
-      hint: `Run pnpm paperclipai allowed-hostname ${apiHost}`
+      hint: `Run pnpm orchestorai allowed-hostname ${apiHost}`
     });
   }
 
@@ -940,7 +940,7 @@ function buildInviteOnboardingManifest(
   }
 ) {
   const baseUrl = requestBaseUrl(req);
-  const skillPath = "/api/skills/paperclip";
+  const skillPath = "/api/skills/orchestorai";
   const skillUrl = baseUrl ? `${baseUrl}${skillPath}` : skillPath;
   const registrationEndpointPath = `/api/invites/${token}/accept`;
   const registrationEndpointUrl = baseUrl
@@ -971,7 +971,7 @@ function buildInviteOnboardingManifest(
     invite: toInviteSummaryResponse(req, token, invite),
     onboarding: {
       instructions:
-        "Join as an OpenClaw agent, save your one-time claim secret, wait for board approval, then claim your API key. Save the claim response token to ~/.openclaw/workspace/paperclip-claimed-api-key.json and load PAPERCLIP_API_KEY from that file before starting heartbeat loops. You MUST include agentDefaultsPayload.headers.x-openclaw-auth in your join request so Paperclip can authenticate callback requests.",
+        "Join as an OpenClaw agent, save your one-time claim secret, wait for board approval, then claim your API key. Save the claim response token to ~/.openclaw/workspace/orchestorai-claimed-api-key.json and load ORCHESTORAI_API_KEY from that file before starting heartbeat loops. You MUST include agentDefaultsPayload.headers.x-openclaw-auth in your join request so OrchestorAI can authenticate callback requests.",
       inviteMessage: extractInviteMessage(invite),
       recommendedAdapterType: "openclaw",
       requiredFields: {
@@ -980,7 +980,7 @@ function buildInviteOnboardingManifest(
         adapterType: "Use 'openclaw' for OpenClaw agents",
         capabilities: "Optional capability summary",
         agentDefaultsPayload:
-          "Adapter config for OpenClaw endpoint. MUST include headers.x-openclaw-auth; include streamTransport ('sse' or 'webhook') plus url/method/paperclipApiUrl (and optional webhookAuthHeader/timeoutSec/payloadTemplate)."
+          "Adapter config for OpenClaw endpoint. MUST include headers.x-openclaw-auth; include streamTransport ('sse' or 'webhook') plus url/method/orchestoraiApiUrl (and optional webhookAuthHeader/timeoutSec/payloadTemplate)."
       },
       registrationEndpoint: {
         method: "POST",
@@ -1014,8 +1014,8 @@ function buildInviteOnboardingManifest(
         guidance:
           opts.deploymentMode === "authenticated" &&
           opts.deploymentExposure === "private"
-            ? "If OpenClaw runs on another machine, ensure the Paperclip hostname is reachable and allowed via `pnpm paperclipai allowed-hostname <host>`."
-            : "Ensure OpenClaw can reach this Paperclip API base URL for callbacks and claims."
+            ? "If OpenClaw runs on another machine, ensure the OrchestorAI hostname is reachable and allowed via `pnpm orchestorai allowed-hostname <host>`."
+            : "Ensure OpenClaw can reach this OrchestorAI API base URL for callbacks and claims."
       },
       textInstructions: {
         path: onboardingTextPath,
@@ -1023,10 +1023,10 @@ function buildInviteOnboardingManifest(
         contentType: "text/plain"
       },
       skill: {
-        name: "paperclip",
+        name: "orchestorai",
         path: skillPath,
         url: skillUrl,
-        installPath: "~/.openclaw/skills/paperclip/SKILL.md"
+        installPath: "~/.openclaw/skills/orchestorai/SKILL.md"
       }
     }
   };
@@ -1076,7 +1076,7 @@ export function buildInviteOnboardingTextDocument(
   };
 
   appendBlock(`
-    # Paperclip OpenClaw Onboarding
+    # OrchestorAI OpenClaw Onboarding
 
     This document is meant to be readable by both humans and agents.
 
@@ -1120,7 +1120,7 @@ export function buildInviteOnboardingTextDocument(
         capabilities: "OpenClaw agent adapter",
         agentDefaultsPayload: {
           url: "http://127.0.0.1:18789/v1/responses",
-          paperclipApiUrl: "http://host.docker.internal:3100",
+          orchestoraiApiUrl: "http://host.docker.internal:3100",
           streamTransport: "sse",
           method: "POST",
           headers: { "x-openclaw-auth": token },
@@ -1136,7 +1136,7 @@ export function buildInviteOnboardingTextDocument(
   }
 
     IMPORTANT: You MUST include agentDefaultsPayload.headers.x-openclaw-auth with your gateway token.
-    Without this token, Paperclip callback requests to your OpenClaw endpoint will fail with 401 Unauthorized.
+    Without this token, OrchestorAI callback requests to your OpenClaw endpoint will fail with 401 Unauthorized.
     Set "streamTransport" to "sse" for streaming /v1/responses endpoints, or "webhook" for wake-style callbacks.
 
     Body (JSON):
@@ -1147,7 +1147,7 @@ export function buildInviteOnboardingTextDocument(
       "capabilities": "Optional summary",
       "agentDefaultsPayload": {
         "url": "https://your-openclaw-agent.example/v1/responses",
-        "paperclipApiUrl": "https://paperclip-hostname-your-agent-can-reach:3100",
+        "orchestoraiApiUrl": "https://orchestorai-hostname-your-agent-can-reach:3100",
         "streamTransport": "sse",
         "method": "POST",
         "headers": { "x-openclaw-auth": "replace-me" },
@@ -1166,7 +1166,7 @@ export function buildInviteOnboardingTextDocument(
     'openclaw_auth_header_missing'
 
     ## Step 2: Wait for board approval
-    The board approves the join request in Paperclip before key claim is allowed.
+    The board approves the join request in OrchestorAI before key claim is allowed.
 
     ## Step 3: Claim API key (one-time)
     ${
@@ -1180,33 +1180,33 @@ export function buildInviteOnboardingTextDocument(
 
     On successful claim, save the full JSON response to:
 
-    - ~/.openclaw/workspace/paperclip-claimed-api-key.json
-    chmod 600 ~/.openclaw/workspace/paperclip-claimed-api-key.json
+    - ~/.openclaw/workspace/orchestorai-claimed-api-key.json
+    chmod 600 ~/.openclaw/workspace/orchestorai-claimed-api-key.json
 
-    And set the PAPERCLIP_API_KEY and PAPERCLIP_API_URL in your environment variables as specified here:
+    And set the ORCHESTORAI_API_KEY and ORCHESTORAI_API_URL in your environment variables as specified here:
     https://docs.openclaw.ai/help/environment
 
     e.g. 
 
     {
       env: {
-        PAPERCLIP_API_KEY: "...",
-        PAPERCLIP_API_URL: "...",
+        ORCHESTORAI_API_KEY: "...",
+        ORCHESTORAI_API_URL: "...",
       },
     }
 
-    Then set PAPERCLIP_API_KEY and PAPERCLIP_API_URL from the saved token field for every heartbeat run.
+    Then set ORCHESTORAI_API_KEY and ORCHESTORAI_API_URL from the saved token field for every heartbeat run.
 
     Important:
     - claim secrets expire
     - claim secrets are single-use
     - claim fails before board approval
 
-    ## Step 4: Install Paperclip skill in OpenClaw
+    ## Step 4: Install OrchestorAI skill in OpenClaw
     GET ${onboarding.skill.url}
     Install path: ${onboarding.skill.installPath}
 
-    Be sure to prepend your PAPERCLIP_API_URL to the top of your skill and note the path to your PAPERCLIP_API_URL
+    Be sure to prepend your ORCHESTORAI_API_URL to the top of your skill and note the path to your ORCHESTORAI_API_URL
 
     ## Text onboarding URL
     ${onboarding.textInstructions.url}
@@ -1214,18 +1214,18 @@ export function buildInviteOnboardingTextDocument(
     ## Connectivity guidance
     ${
       onboarding.connectivity?.guidance ??
-      "Ensure Paperclip is reachable from your OpenClaw runtime."
+      "Ensure OrchestorAI is reachable from your OpenClaw runtime."
     }
   `);
 
   if (onboarding.connectivity?.testResolutionEndpoint?.url) {
     appendBlock(`
-      ## Optional: test callback resolution from Paperclip
+      ## Optional: test callback resolution from OrchestorAI
       ${onboarding.connectivity.testResolutionEndpoint.method ?? "GET"} ${
       onboarding.connectivity.testResolutionEndpoint.url
     }?url=https%3A%2F%2Fyour-openclaw-agent.example%2Fv1%2Fresponses
 
-      This endpoint checks whether Paperclip can reach your OpenClaw endpoint and reports reachable, timeout, or unreachable.
+      This endpoint checks whether OrchestorAI can reach your OpenClaw endpoint and reports reachable, timeout, or unreachable.
     `);
   }
 
@@ -1238,7 +1238,7 @@ export function buildInviteOnboardingTextDocument(
     : [];
 
   if (connectionCandidates.length > 0) {
-    lines.push("## Suggested Paperclip base URLs to try");
+    lines.push("## Suggested OrchestorAI base URLs to try");
     for (const candidate of connectionCandidates) {
       lines.push(`- ${candidate}`);
     }
@@ -1246,12 +1246,12 @@ export function buildInviteOnboardingTextDocument(
 
       Test each candidate with:
       - GET <candidate>/api/health
-      - set the first reachable candidate as agentDefaultsPayload.paperclipApiUrl when submitting your join request
+      - set the first reachable candidate as agentDefaultsPayload.orchestoraiApiUrl when submitting your join request
 
       If none are reachable: ask your human operator for a reachable hostname/address and help them update network configuration.
       For authenticated/private mode, they may need:
-      - pnpm paperclipai allowed-hostname <host>
-      - then restart Paperclip and retry onboarding.
+      - pnpm orchestorai allowed-hostname <host>
+      - then restart OrchestorAI and retry onboarding.
     `);
   }
 
@@ -1329,7 +1329,7 @@ function isLocalImplicit(req: Request) {
 }
 
 async function resolveActorEmail(db: Db, req: Request): Promise<string | null> {
-  if (isLocalImplicit(req)) return "local@paperclip.local";
+  if (isLocalImplicit(req)) return "local@orchestorai.local";
   const userId = req.actor.userId;
   if (!userId) return null;
   const user = await db
@@ -1595,10 +1595,10 @@ export function accessRoutes(
   router.get("/skills/index", (_req, res) => {
     res.json({
       skills: [
-        { name: "paperclip", path: "/api/skills/paperclip" },
+        { name: "orchestorai", path: "/api/skills/orchestorai" },
         {
-          name: "paperclip-create-agent",
-          path: "/api/skills/paperclip-create-agent"
+          name: "orchestorai-create-agent",
+          path: "/api/skills/orchestorai-create-agent"
         }
       ]
     });
@@ -1906,7 +1906,7 @@ export function accessRoutes(
               responsesWebhookUrl: req.body.responsesWebhookUrl ?? null,
               responsesWebhookMethod: req.body.responsesWebhookMethod ?? null,
               responsesWebhookHeaders: req.body.responsesWebhookHeaders ?? null,
-              paperclipApiUrl: req.body.paperclipApiUrl ?? null,
+              orchestoraiApiUrl: req.body.orchestoraiApiUrl ?? null,
               webhookAuthHeader: req.body.webhookAuthHeader ?? null,
               inboundOpenClawAuthHeader: req.header("x-openclaw-auth") ?? null,
               inboundOpenClawTokenHeader: req.header("x-openclaw-token") ?? null
@@ -1925,7 +1925,7 @@ export function accessRoutes(
             responsesWebhookUrl: nonEmptyTrimmedString(
               req.body.responsesWebhookUrl
             ),
-            paperclipApiUrl: nonEmptyTrimmedString(req.body.paperclipApiUrl),
+            orchestoraiApiUrl: nonEmptyTrimmedString(req.body.orchestoraiApiUrl),
             webhookAuthHeader: summarizeSecretForLog(
               req.body.webhookAuthHeader
             ),
@@ -2110,10 +2110,10 @@ export function accessRoutes(
         if (expectedDefaults.url && !persistedDefaults.url)
           missingPersistedFields.push("url");
         if (
-          expectedDefaults.paperclipApiUrl &&
-          !persistedDefaults.paperclipApiUrl
+          expectedDefaults.orchestoraiApiUrl &&
+          !persistedDefaults.orchestoraiApiUrl
         ) {
-          missingPersistedFields.push("paperclipApiUrl");
+          missingPersistedFields.push("orchestoraiApiUrl");
         }
         if (
           expectedDefaults.webhookAuthHeader &&

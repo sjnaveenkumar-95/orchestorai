@@ -56,15 +56,15 @@ describe("runCommand", () => {
     vi.doMock("../commands/doctor.js", () => ({ doctor }));
     vi.doMock("../config/store.js", () => ({
       configExists: vi.fn(() => false),
-      resolveConfigPath: vi.fn(() => "/tmp/paperclip-home/instances/default/config.json"),
+      resolveConfigPath: vi.fn(() => "/tmp/orchestorai-home/instances/default/config.json"),
     }));
     vi.doMock("../config/home.js", () => ({
-      resolvePaperclipInstanceId: vi.fn(() => "default"),
-      resolvePaperclipHomeDir: vi.fn(() => "/tmp/paperclip-home"),
+      resolveOrchestorAIInstanceId: vi.fn(() => "default"),
+      resolveOrchestorAIHomeDir: vi.fn(() => "/tmp/orchestorai-home"),
       describeLocalInstancePaths: vi.fn(() => ({
-        homeDir: "/tmp/paperclip-home",
+        homeDir: "/tmp/orchestorai-home",
         instanceId: "default",
-        instanceRoot: "/tmp/paperclip-home/instances/default",
+        instanceRoot: "/tmp/orchestorai-home/instances/default",
       })),
     }));
     vi.doMock("node:fs", () => ({
@@ -79,17 +79,17 @@ describe("runCommand", () => {
     await expect(runCommand({ yes: true })).rejects.toThrow("exit:1");
 
     expect(onboard).toHaveBeenCalledWith({
-      config: "/tmp/paperclip-home/instances/default/config.json",
+      config: "/tmp/orchestorai-home/instances/default/config.json",
       invokedByRun: true,
       yes: true,
     });
     expect(doctor).toHaveBeenCalledWith({
-      config: "/tmp/paperclip-home/instances/default/config.json",
+      config: "/tmp/orchestorai-home/instances/default/config.json",
       repair: true,
       yes: true,
     });
-    expect(mkdirSync).toHaveBeenCalledWith("/tmp/paperclip-home", { recursive: true });
-    expect(mkdirSync).toHaveBeenCalledWith("/tmp/paperclip-home/instances/default", { recursive: true });
+    expect(mkdirSync).toHaveBeenCalledWith("/tmp/orchestorai-home", { recursive: true });
+    expect(mkdirSync).toHaveBeenCalledWith("/tmp/orchestorai-home/instances/default", { recursive: true });
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
 });

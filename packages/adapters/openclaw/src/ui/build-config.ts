@@ -1,4 +1,4 @@
-import type { CreateConfigValues } from "@paperclipai/adapter-utils";
+import type { CreateConfigValues } from "@orchestorai/adapter-utils";
 
 export function buildOpenClawConfig(v: CreateConfigValues): Record<string, unknown> {
   const ac: Record<string, unknown> = {};
@@ -7,6 +7,6 @@ export function buildOpenClawConfig(v: CreateConfigValues): Record<string, unkno
   ac.timeoutSec = 0;
   ac.streamTransport = "sse";
   ac.sessionKeyStrategy = "fixed";
-  ac.sessionKey = "paperclip";
+  ac.sessionKey = "orchestorai";
   return ac;
 }

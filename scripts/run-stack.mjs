@@ -20,7 +20,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForPaperclip(baseUrl, timeoutMs) {
+async function waitForOrchestorAI(baseUrl, timeoutMs) {
   const startedAt = Date.now();
   const healthUrl = new URL("/api/health", String(baseUrl));
 
@@ -40,7 +40,7 @@ async function waitForPaperclip(baseUrl, timeoutMs) {
     await sleep(1000);
   }
 
-  throw new Error(`Paperclip did not become ready within ${timeoutMs}ms (${healthUrl.toString()})`);
+  throw new Error(`OrchestorAI did not become ready within ${timeoutMs}ms (${healthUrl.toString()})`);
 }
 
 const mode = process.argv[2] === "production" ? "production" : "development";
@@ -55,16 +55,16 @@ if (!env.CODEX_WORKDIR) {
 if (!env.SLACK_PORT) {
   env.SLACK_PORT = "3000";
 }
-if (!env.PAPERCLIP_API_URL) {
-  env.PAPERCLIP_API_URL = `http://127.0.0.1:${env.PORT || "3100"}`;
+if (!env.ORCHESTORAI_API_URL) {
+  env.ORCHESTORAI_API_URL = `http://127.0.0.1:${env.PORT || "3100"}`;
 }
 if (!env.DATA_DIR) {
-  env.DATA_DIR = env.PAPERCLIP_HOME
-    ? path.join(env.PAPERCLIP_HOME, "slack-bot", "data")
+  env.DATA_DIR = env.ORCHESTORAI_HOME
+    ? path.join(env.ORCHESTORAI_HOME, "slack-bot", "data")
     : path.join(cwd, "packages", "slack-bot", "data");
 }
-if (!env.PAPERCLIP_ENABLED && env.PAPERCLIP_COMPANY_ID) {
-  env.PAPERCLIP_ENABLED = "true";
+if (!env.ORCHESTORAI_ENABLED && env.ORCHESTORAI_COMPANY_ID) {
+  env.ORCHESTORAI_ENABLED = "true";
 }
 
 const pnpmBin = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
@@ -143,21 +143,21 @@ async function main() {
         }
       : {
           command: pnpmBin,
-          args: ["--filter", "@paperclipai/server", "dev"],
+          args: ["--filter", "@orchestorai/server", "dev"],
         };
 
-  spawnManaged("paperclip-server", server.command, server.args);
+  spawnManaged("orchestorai-server", server.command, server.args);
 
-  const slackEnabled = parseBool(env.PAPERCLIP_SLACK_ENABLED, false);
+  const slackEnabled = parseBool(env.ORCHESTORAI_SLACK_ENABLED, false);
   if (!slackEnabled) {
-    console.log("[stack] PAPERCLIP_SLACK_ENABLED is false; running Paperclip only.");
+    console.log("[stack] ORCHESTORAI_SLACK_ENABLED is false; running OrchestorAI only.");
     await new Promise(() => {});
   }
 
-  console.log(`[stack] waiting for Paperclip at ${env.PAPERCLIP_API_URL} before starting Slack bot`);
-  await waitForPaperclip(env.PAPERCLIP_API_URL, 120000);
-  console.log("[stack] Paperclip is ready; starting Slack bot");
-  spawnManaged("paperclip-slack-bot", pnpmBin, ["--filter", "@paperclipai/slack-bot", "start"]);
+  console.log(`[stack] waiting for OrchestorAI at ${env.ORCHESTORAI_API_URL} before starting Slack bot`);
+  await waitForOrchestorAI(env.ORCHESTORAI_API_URL, 120000);
+  console.log("[stack] OrchestorAI is ready; starting Slack bot");
+  spawnManaged("orchestorai-slack-bot", pnpmBin, ["--filter", "@orchestorai/slack-bot", "start"]);
 
   await new Promise(() => {});
 }

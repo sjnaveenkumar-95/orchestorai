@@ -4,20 +4,20 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-export PAPERCLIP_INSTANCE_ID="${PAPERCLIP_INSTANCE_ID:-default}"
-export PAPERCLIP_DATA_DIR="${PAPERCLIP_DATA_DIR:-$HOME/.paperclip}"
-export PAPERCLIP_RUNTIME_HOME="${PAPERCLIP_RUNTIME_HOME:-$PAPERCLIP_DATA_DIR}"
-export PAPERCLIP_HOST_WORKSPACE_ROOT="${PAPERCLIP_HOST_WORKSPACE_ROOT:-$HOME/Workspace}"
-export CODEX_ADDITIONAL_WRITABLE_DIRS="${CODEX_ADDITIONAL_WRITABLE_DIRS:-${PAPERCLIP_RUNTIME_HOME},/workspace/project,${PAPERCLIP_HOST_WORKSPACE_ROOT}}"
+export ORCHESTORAI_INSTANCE_ID="${ORCHESTORAI_INSTANCE_ID:-default}"
+export ORCHESTORAI_DATA_DIR="${ORCHESTORAI_DATA_DIR:-$HOME/.orchestorai}"
+export ORCHESTORAI_RUNTIME_HOME="${ORCHESTORAI_RUNTIME_HOME:-$ORCHESTORAI_DATA_DIR}"
+export ORCHESTORAI_HOST_WORKSPACE_ROOT="${ORCHESTORAI_HOST_WORKSPACE_ROOT:-$HOME/Workspace}"
+export CODEX_ADDITIONAL_WRITABLE_DIRS="${CODEX_ADDITIONAL_WRITABLE_DIRS:-${ORCHESTORAI_RUNTIME_HOME},/workspace/project,${ORCHESTORAI_HOST_WORKSPACE_ROOT}}"
 
 mkdir -p \
-  "${PAPERCLIP_DATA_DIR}/docker" \
-  "${PAPERCLIP_DATA_DIR}/instances/${PAPERCLIP_INSTANCE_ID}" \
-  "${PAPERCLIP_DATA_DIR}/instances/${PAPERCLIP_INSTANCE_ID}/logs" \
-  "${PAPERCLIP_DATA_DIR}/.cache/node/corepack" \
-  "${PAPERCLIP_DATA_DIR}/.tmp"
+  "${ORCHESTORAI_DATA_DIR}/docker" \
+  "${ORCHESTORAI_DATA_DIR}/instances/${ORCHESTORAI_INSTANCE_ID}" \
+  "${ORCHESTORAI_DATA_DIR}/instances/${ORCHESTORAI_INSTANCE_ID}/logs" \
+  "${ORCHESTORAI_DATA_DIR}/.cache/node/corepack" \
+  "${ORCHESTORAI_DATA_DIR}/.tmp"
 
-PG_HBA_PATH="${PAPERCLIP_DATA_DIR}/docker/pg_hba.conf"
+PG_HBA_PATH="${ORCHESTORAI_DATA_DIR}/docker/pg_hba.conf"
 if [[ ! -f "$PG_HBA_PATH" ]]; then
   cat <<'EOF' > "$PG_HBA_PATH"
 local   all             all                                     password
@@ -50,15 +50,15 @@ export DOCKER_UID="$(id -u)"
 export DOCKER_GID="$(id -g)"
 
 compose_args=(
-  -p paperclip-stack
+  -p orchestorai-stack
   -f docker-compose.slack.yml
   -f docker-compose.local.yml
 )
 
 build_flag=""
-if [[ "${PAPERCLIP_DOCKER_FORCE_BUILD:-}" =~ ^(1|true|yes|on)$ ]]; then
+if [[ "${ORCHESTORAI_DOCKER_FORCE_BUILD:-}" =~ ^(1|true|yes|on)$ ]]; then
   build_flag="--build"
-elif ! docker image inspect paperclip-stack-paperclip >/dev/null 2>&1; then
+elif ! docker image inspect orchestorai-stack-orchestorai >/dev/null 2>&1; then
   build_flag="--build"
 fi
 

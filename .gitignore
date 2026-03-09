@@ -7,9 +7,9 @@ drizzle/meta/
 coverage/
 .DS_Store
 data/
-.paperclip/
-.paperclip-home/
-.paperclip-dev.log
+.orchestorai/
+.orchestorai-home/
+.orchestorai-dev.log
 .codex/
 .pnpm-store/
 tmp-*
@@ -39,4 +39,4 @@ tmp/
 *.tmp
 .vscode/
 .claude/settings.local.json
-.paperclip-local/
+.orchestorai-local/

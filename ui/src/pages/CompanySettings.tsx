@@ -4,7 +4,7 @@ import type {
   InstanceRuntimeSecretStatus,
   InstanceRuntimeValueStatus,
   UpdateInstanceRuntimeSettings
-} from "@paperclipai/shared";
+} from "@orchestorai/shared";
 import { useCompany } from "../context/CompanyContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { companiesApi } from "../api/companies";
@@ -372,8 +372,8 @@ export function CompanySettings() {
           <div className="space-y-1">
             <div className="text-sm font-medium">Runtime connectivity and Slack settings</div>
             <p className="text-xs text-muted-foreground">
-              These values are saved to the global Paperclip instance env file
-              under your Paperclip home directory and apply to the whole runtime.
+              These values are saved to the global OrchestorAI instance env file
+              under your OrchestorAI home directory and apply to the whole runtime.
             </p>
             {instanceSettingsQuery.data?.envFilePath && (
               <p className="text-xs text-muted-foreground">
@@ -402,7 +402,7 @@ export function CompanySettings() {
             <>
               <Field
                 label="Public base URL"
-                hint="The externally reachable Paperclip base URL used for Slack OAuth callbacks and Slack event delivery. Saved as PAPERCLIP_AUTH_PUBLIC_BASE_URL."
+                hint="The externally reachable OrchestorAI base URL used for Slack OAuth callbacks and Slack event delivery. Saved as ORCHESTORAI_AUTH_PUBLIC_BASE_URL."
               >
                 <input
                   className="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm font-mono outline-none"
@@ -410,7 +410,7 @@ export function CompanySettings() {
                   value={authPublicBaseUrl}
                   placeholder={
                     instanceSettingsQuery.data.authPublicBaseUrl.value ??
-                    "https://paperclip.example.com"
+                    "https://orchestorai.example.com"
                   }
                   onChange={(e) => setAuthPublicBaseUrl(e.target.value)}
                 />
@@ -421,7 +421,7 @@ export function CompanySettings() {
 
               <Field
                 label="SLACK_DEFAULT_CHANNEL_MEMBER_IDS"
-                hint="Comma-separated Slack member IDs to auto-invite into every new or resynced project channel. Saved as SLACK_DEFAULT_CHANNEL_MEMBER_IDS in the global Paperclip env file."
+                hint="Comma-separated Slack member IDs to auto-invite into every new or resynced project channel. Saved as SLACK_DEFAULT_CHANNEL_MEMBER_IDS in the global OrchestorAI env file."
               >
                 <input
                   className="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm font-mono outline-none"
@@ -505,7 +505,7 @@ export function CompanySettings() {
 
               <Field
                 label="SLACK_SIGNING_SECRET"
-                hint="Required for Paperclip to receive verified message events from the shared control Slack app."
+                hint="Required for OrchestorAI to receive verified message events from the shared control Slack app."
               >
                 <input
                   className="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm font-mono outline-none"
@@ -546,7 +546,7 @@ export function CompanySettings() {
               </p>
 
               <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-muted-foreground">
-                Restart Paperclip after saving these values. The public base URL,
+                Restart OrchestorAI after saving these values. The public base URL,
                 auth secret, and integrated Slack credentials are loaded at startup.
               </div>
 
@@ -562,7 +562,7 @@ export function CompanySettings() {
                 </Button>
                 {runtimeMutation.isSuccess && (
                   <span className="text-xs text-muted-foreground">
-                    Saved to the global Paperclip env file
+                    Saved to the global OrchestorAI env file
                   </span>
                 )}
                 {runtimeMutation.isError && (
@@ -726,12 +726,12 @@ function describeRuntimeSecret(secret: InstanceRuntimeSecretStatus) {
     return `${secret.envKey} is not configured yet.`;
   }
 
-  if (secret.source === "paperclip_env") {
-    return `${secret.envKey} is currently sourced from the global Paperclip env file (${secret.maskedValue}).`;
+  if (secret.source === "orchestorai_env") {
+    return `${secret.envKey} is currently sourced from the global OrchestorAI env file (${secret.maskedValue}).`;
   }
 
   if (secret.source === "process_env") {
-    return `${secret.envKey} is currently only present in the process environment (${secret.maskedValue}). Saving here will move it into the global Paperclip env file.`;
+    return `${secret.envKey} is currently only present in the process environment (${secret.maskedValue}). Saving here will move it into the global OrchestorAI env file.`;
   }
 
   return `${secret.envKey} is configured (${secret.maskedValue}).`;
@@ -742,16 +742,16 @@ function describeRuntimeValue(setting: InstanceRuntimeValueStatus) {
     return `${setting.envKey} is not configured yet.`;
   }
 
-  if (setting.source === "paperclip_env") {
-    return `${setting.envKey} is currently sourced from the global Paperclip env file (${setting.value}).`;
+  if (setting.source === "orchestorai_env") {
+    return `${setting.envKey} is currently sourced from the global OrchestorAI env file (${setting.value}).`;
   }
 
   if (setting.source === "process_env") {
-    return `${setting.envKey} is currently only present in the process environment (${setting.value}). Saving here will move it into the global Paperclip env file.`;
+    return `${setting.envKey} is currently only present in the process environment (${setting.value}). Saving here will move it into the global OrchestorAI env file.`;
   }
 
   if (setting.source === "config_file") {
-    return `${setting.envKey} currently falls back to the Paperclip config file (${setting.value}). Saving here will override it in the global Paperclip env file.`;
+    return `${setting.envKey} currently falls back to the OrchestorAI config file (${setting.value}). Saving here will override it in the global OrchestorAI env file.`;
   }
 
   return `${setting.envKey} is configured (${setting.value}).`;
@@ -768,45 +768,45 @@ function buildAgentSnippet(input: AgentSnippetInput) {
 
   const connectivityBlock =
     candidateUrls.length === 0
-      ? `No candidate URLs are available. Ask your user to configure a reachable hostname in Paperclip, then retry.
+      ? `No candidate URLs are available. Ask your user to configure a reachable hostname in OrchestorAI, then retry.
 Suggested steps:
-- choose a hostname that resolves to the Paperclip host from your runtime
-- run: pnpm paperclipai allowed-hostname <host>
-- restart Paperclip
+- choose a hostname that resolves to the OrchestorAI host from your runtime
+- run: pnpm orchestorai allowed-hostname <host>
+- restart OrchestorAI
 - verify with: curl -fsS http://<host>:3100/api/health
 - regenerate this invite snippet`
-      : `If none are reachable, ask your user to add a reachable hostname in Paperclip, restart, and retry.
+      : `If none are reachable, ask your user to add a reachable hostname in OrchestorAI, restart, and retry.
 Suggested command:
-- pnpm paperclipai allowed-hostname <host>
+- pnpm orchestorai allowed-hostname <host>
 Then verify with: curl -fsS <base-url>/api/health`;
 
   const resolutionLine = resolutionTestUrl
-    ? `\nYou MUST test callback reachability, call: ${resolutionTestUrl}?url=<urlencoded-webhook-url> (well using the hostname that worked above). Do not assume your 172.x is necessarily reachable from Paperclip. Test it. `
+    ? `\nYou MUST test callback reachability, call: ${resolutionTestUrl}?url=<urlencoded-webhook-url> (well using the hostname that worked above). Do not assume your 172.x is necessarily reachable from OrchestorAI. Test it. `
     : "";
 
-  return `You're invited to join a Paperclip organization.
+  return `You're invited to join a OrchestorAI organization.
 
 The URLs you should try are:
 ${candidateList}
 
 Connectivity guidance:
-If you are running on a different machine than Paperclip, Paperclip must be reachable at one of the hostnames used above.
+If you are running on a different machine than OrchestorAI, OrchestorAI must be reachable at one of the hostnames used above.
 Verify the hostname works from your runtime with: GET <base-url>/api/health
 
 ${connectivityBlock}
 
 For your "agentName", just use your own agent name (OpenClaw or whatever your name is) and send it directly.
-You also need to send a webhook URL that Paperclip can access. Check your config and include that URL.${resolutionLine}
+You also need to send a webhook URL that OrchestorAI can access. Check your config and include that URL.${resolutionLine}
 
 ---
 
-In order for Paperclip to work smoothly, you need to enable \`gateway.http.endpoints.responses.enabled=true\` in your OpenClaw config.
+In order for OrchestorAI to work smoothly, you need to enable \`gateway.http.endpoints.responses.enabled=true\` in your OpenClaw config.
 
 Please enable that setting and notify your user that we did so.
 
-Before you do anything, please respond to your user that you understand the instructions and you're going to work on them. Then do the step above in another session called "paperclip-onboarding" and then tell your user when you're done. Update your user in intermediate steps along the way so they know what's going on.
+Before you do anything, please respond to your user that you understand the instructions and you're going to work on them. Then do the step above in another session called "orchestorai-onboarding" and then tell your user when you're done. Update your user in intermediate steps along the way so they know what's going on.
 
-Then after you've connected to Paperclip (exchanged keys etc.) you MUST review and follow the onboarding instructions in onboarding.txt they give you.
+Then after you've connected to OrchestorAI (exchanged keys etc.) you MUST review and follow the onboarding instructions in onboarding.txt they give you.
 
 `;
 }

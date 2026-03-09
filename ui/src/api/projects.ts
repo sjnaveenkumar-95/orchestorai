@@ -3,7 +3,7 @@ import type {
   ProjectMember,
   ProjectSlackState,
   ProjectWorkspace,
-} from "@paperclipai/shared";
+} from "@orchestorai/shared";
 import { api } from "./client";
 
 function withCompanyScope(path: string, companyId?: string) {

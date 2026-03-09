@@ -10,33 +10,33 @@ services:
       - -c
       - hba_file=/etc/postgresql/pg_hba.conf
     volumes:
-      - ${PAPERCLIP_DATA_DIR}/instances/default/db:/var/lib/postgresql/data
-      - ${PAPERCLIP_DATA_DIR}/docker/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ${ORCHESTORAI_DATA_DIR}/instances/default/db:/var/lib/postgresql/data
+      - ${ORCHESTORAI_DATA_DIR}/docker/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
 
-  paperclip:
+  orchestorai:
     user: "${DOCKER_UID}:${DOCKER_GID}"
     env_file:
       - .env
     environment:
-      HOME: "${PAPERCLIP_RUNTIME_HOME}"
+      HOME: "${ORCHESTORAI_RUNTIME_HOME}"
       TMPDIR: "/tmp"
-      XDG_CACHE_HOME: "${PAPERCLIP_RUNTIME_HOME}/.cache"
-      COREPACK_HOME: "${PAPERCLIP_RUNTIME_HOME}/.cache/node/corepack"
+      XDG_CACHE_HOME: "${ORCHESTORAI_RUNTIME_HOME}/.cache"
+      COREPACK_HOME: "${ORCHESTORAI_RUNTIME_HOME}/.cache/node/corepack"
       HOST: "127.0.0.1"
       PORT: "3101"
-      PAPERCLIP_HOME: "${PAPERCLIP_RUNTIME_HOME}"
-      PAPERCLIP_DATA_DIR: "${PAPERCLIP_RUNTIME_HOME}"
-      PAPERCLIP_CONFIG: "${PAPERCLIP_RUNTIME_HOME}/instances/default/config.json"
-      PAPERCLIP_LOG_DIR: "${PAPERCLIP_RUNTIME_HOME}/instances/default/logs"
-      PAPERCLIP_API_URL: "http://127.0.0.1:3101"
+      ORCHESTORAI_HOME: "${ORCHESTORAI_RUNTIME_HOME}"
+      ORCHESTORAI_DATA_DIR: "${ORCHESTORAI_RUNTIME_HOME}"
+      ORCHESTORAI_CONFIG: "${ORCHESTORAI_RUNTIME_HOME}/instances/default/config.json"
+      ORCHESTORAI_LOG_DIR: "${ORCHESTORAI_RUNTIME_HOME}/instances/default/logs"
+      ORCHESTORAI_API_URL: "http://127.0.0.1:3101"
       CODEX_HOME: "/workspace/project/.codex"
       CODEX_WORKDIR: "${CODEX_WORKDIR:-/workspace/project}"
       CODEX_ADDITIONAL_WRITABLE_DIRS: "${CODEX_ADDITIONAL_WRITABLE_DIRS}"
-      DATA_DIR: "${PAPERCLIP_RUNTIME_HOME}/slack-bot/data"
-      RUN_LOG_BASE_PATH: "${PAPERCLIP_RUNTIME_HOME}/instances/default/data/run-logs"
-      PAPERCLIP_TASK_PREFIX: "${PAPERCLIP_TASK_PREFIX:-task:}"
-      PAPERCLIP_SYNC_REPLIES: "${PAPERCLIP_SYNC_REPLIES:-mention_only}"
-      PAPERCLIP_NOTIFICATION_MODE: "${PAPERCLIP_NOTIFICATION_MODE:-high_signal}"
+      DATA_DIR: "${ORCHESTORAI_RUNTIME_HOME}/slack-bot/data"
+      RUN_LOG_BASE_PATH: "${ORCHESTORAI_RUNTIME_HOME}/instances/default/data/run-logs"
+      ORCHESTORAI_TASK_PREFIX: "${ORCHESTORAI_TASK_PREFIX:-task:}"
+      ORCHESTORAI_SYNC_REPLIES: "${ORCHESTORAI_SYNC_REPLIES:-mention_only}"
+      ORCHESTORAI_NOTIFICATION_MODE: "${ORCHESTORAI_NOTIFICATION_MODE:-high_signal}"
     command:
       - sh
       - -lc
@@ -46,4 +46,4 @@ services:
     volumes:
       - ./:/workspace/project
       - ./packages/slack-bot/src:/app/packages/slack-bot/src
-      - ${PAPERCLIP_HOST_WORKSPACE_ROOT}:${PAPERCLIP_HOST_WORKSPACE_ROOT}
+      - ${ORCHESTORAI_HOST_WORKSPACE_ROOT}:${ORCHESTORAI_HOST_WORKSPACE_ROOT}

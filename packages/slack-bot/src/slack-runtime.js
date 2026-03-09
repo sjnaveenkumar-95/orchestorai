@@ -2,12 +2,12 @@ import fs from "node:fs";
 import SlackBolt from "@slack/bolt";
 import { PairingStore } from "./pairing-store.js";
 import { handleSlackNativeAction } from "./slack-actions.js";
-import { PaperclipClient } from "./paperclip-client.js";
-import { PaperclipThreadStore } from "./paperclip-thread-store.js";
+import { OrchestorAIClient } from "./orchestorai-client.js";
+import { OrchestorAIThreadStore } from "./orchestorai-thread-store.js";
 import {
-  detectPaperclipCommentRequest,
+  detectOrchestorAICommentRequest,
   buildIssueDescription,
-  detectPaperclipSummaryRequest,
+  detectOrchestorAISummaryRequest,
   detectTaskRequest,
   extractProjectSelectors,
   extractIssueIdentifiers,
@@ -17,11 +17,11 @@ import {
   formatChildIssueThreadRootMessage,
   formatRunNotification,
   getPrimaryReferenceAlias,
-  hasPaperclipTrigger,
+  hasOrchestorAITrigger,
   resolveAssignee,
   resolveProject,
   stripBotMention,
-} from "./paperclip-bridge.js";
+} from "./orchestorai-bridge.js";
 
 const slackBoltModule = SlackBolt;
 const slackBolt = (slackBoltModule.App ? slackBoltModule : slackBoltModule.default) ?? slackBoltModule;
@@ -33,8 +33,8 @@ const MAX_CONTEXT_HISTORY_LINES = 30;
 const SLACK_TYPING_KEEPALIVE_MS = 3000;
 const SLACK_TYPING_MAX_DURATION_MS = 60000;
 const SLACK_TYPING_MAX_FAILURES = 2;
-const PAPERCLIP_RUN_CACHE_TTL_MS = 15 * 60 * 1000;
-const PAPERCLIP_LIVE_EVENT_TTL_MS = 10 * 60 * 1000;
+const ORCHESTORAI_RUN_CACHE_TTL_MS = 15 * 60 * 1000;
+const ORCHESTORAI_LIVE_EVENT_TTL_MS = 10 * 60 * 1000;
 
 function slugify(value) {
   return String(value || "")
@@ -201,8 +201,8 @@ function formatOverviewIssueEntry(issue, agentsById) {
   return `${label} (${details.join(", ")})`;
 }
 
-export function buildPaperclipIssueSummary({ issue, assigneeName = "", projectName = "", parentIdentifier = "" }) {
-  const identifier = String(issue?.identifier || "Paperclip issue").trim();
+export function buildOrchestorAIIssueSummary({ issue, assigneeName = "", projectName = "", parentIdentifier = "" }) {
+  const identifier = String(issue?.identifier || "OrchestorAI issue").trim();
   const title = truncateTextValue(issue?.title || "Untitled issue", 140);
   const statusParts = [
     `Status: ${humanizeToken(issue?.status)}`,
@@ -233,7 +233,7 @@ export function buildPaperclipIssueSummary({ issue, assigneeName = "", projectNa
   ].join("\n");
 }
 
-export function buildPaperclipOverviewSummary({
+export function buildOrchestorAIOverviewSummary({
   issues,
   agentsById = new Map(),
   projectName = "",
@@ -244,7 +244,7 @@ export function buildPaperclipOverviewSummary({
     ? `in ${projectName}`
     : scopeLabel
       ? `for ${scopeLabel}`
-      : "in Paperclip";
+      : "in OrchestorAI";
 
   if (visibleIssues.length === 0) {
     return `*Summary*\n- No tickets found ${scope}.`;
@@ -290,12 +290,12 @@ export function buildPaperclipOverviewSummary({
   ].join("\n");
 }
 
-export function buildPaperclipLatestCommentSummary({
+export function buildOrchestorAILatestCommentSummary({
   identifier,
   comment,
   authorName = "",
 }) {
-  const issueRef = String(identifier || "Paperclip issue").trim();
+  const issueRef = String(identifier || "OrchestorAI issue").trim();
   if (!comment) {
     return `*Summary*\n- ${issueRef} has no comments yet.`;
   }
@@ -537,23 +537,23 @@ export class SlackRuntime {
 
     fs.mkdirSync(this.config.runtime.dataDir, { recursive: true });
 
-    this.paperclipClient = this.config.paperclip.enabled
-      ? new PaperclipClient({
-          apiUrl: this.config.paperclip.apiUrl,
-          companyId: this.config.paperclip.companyId,
+    this.orchestoraiClient = this.config.orchestorai.enabled
+      ? new OrchestorAIClient({
+          apiUrl: this.config.orchestorai.apiUrl,
+          companyId: this.config.orchestorai.companyId,
           log: (level, message) => this.log(level, message),
         })
       : null;
-    this.paperclipThreadStore = this.config.paperclip.enabled
-      ? new PaperclipThreadStore(this.config.runtime.dataDir)
+    this.orchestoraiThreadStore = this.config.orchestorai.enabled
+      ? new OrchestorAIThreadStore(this.config.runtime.dataDir)
       : null;
-    if (this.paperclipThreadStore) {
-      this.paperclipThreadStore.ensureLoaded();
+    if (this.orchestoraiThreadStore) {
+      this.orchestoraiThreadStore.ensureLoaded();
     }
-    this.paperclipRunIssueCache = new Map();
-    this.paperclipThreadProvisioning = new Map();
-    this.paperclipSeenLiveEvents = new Map();
-    this.paperclipStopLiveEvents = null;
+    this.orchestoraiRunIssueCache = new Map();
+    this.orchestoraiThreadProvisioning = new Map();
+    this.orchestoraiSeenLiveEvents = new Map();
+    this.orchestoraiStopLiveEvents = null;
 
     const appOptions =
       this.config.slack.mode === "http"
@@ -588,8 +588,8 @@ export class SlackRuntime {
     }
   }
 
-  isPaperclipEnabled() {
-    return Boolean(this.paperclipClient && this.paperclipThreadStore && this.config.paperclip.enabled);
+  isOrchestorAIEnabled() {
+    return Boolean(this.orchestoraiClient && this.orchestoraiThreadStore && this.config.orchestorai.enabled);
   }
 
   isDirectBotMention(event, options) {
@@ -603,38 +603,38 @@ export class SlackRuntime {
     return this.mentionRegexes.some((regex) => regex.test(text));
   }
 
-  getMappedPaperclipThread(event) {
-    if (!this.paperclipThreadStore) {
+  getMappedOrchestorAIThread(event) {
+    if (!this.orchestoraiThreadStore) {
       return null;
     }
     if (!isThreadReplyMessage(event)) {
       return null;
     }
-    return this.paperclipThreadStore.getMapping(event.channel, event.thread_ts);
+    return this.orchestoraiThreadStore.getMapping(event.channel, event.thread_ts);
   }
 
-  rememberPaperclipPreferredChannel({ channelId, channelType, event, options }) {
-    if (!this.paperclipThreadStore || !this.config?.paperclip?.companyId || !channelId) {
+  rememberOrchestorAIPreferredChannel({ channelId, channelType, event, options }) {
+    if (!this.orchestoraiThreadStore || !this.config?.orchestorai?.companyId || !channelId) {
       return;
     }
 
     if (channelType === "im") {
-      this.paperclipThreadStore.setPreferredChannel(this.config.paperclip.companyId, channelId);
+      this.orchestoraiThreadStore.setPreferredChannel(this.config.orchestorai.companyId, channelId);
       return;
     }
 
     const text = String(event?.text || "");
-    const explicitPaperclipTrigger = hasPaperclipTrigger({
+    const explicitOrchestorAITrigger = hasOrchestorAITrigger({
       text,
       botUserId: this.botUserId,
-      triggerMentions: this.config.paperclip.triggerMentions,
+      triggerMentions: this.config.orchestorai.triggerMentions,
     });
-    if (explicitPaperclipTrigger || this.isDirectBotMention(event, options)) {
-      this.paperclipThreadStore.setPreferredChannel(this.config.paperclip.companyId, channelId);
+    if (explicitOrchestorAITrigger || this.isDirectBotMention(event, options)) {
+      this.orchestoraiThreadStore.setPreferredChannel(this.config.orchestorai.companyId, channelId);
     }
   }
 
-  rememberPaperclipRunIssues(runId, issues) {
+  rememberOrchestorAIRunIssues(runId, issues) {
     if (!runId) {
       return;
     }
@@ -646,39 +646,39 @@ export class SlackRuntime {
       ),
     );
     if (issueIds.length === 0) {
-      this.paperclipRunIssueCache.delete(String(runId));
+      this.orchestoraiRunIssueCache.delete(String(runId));
       return;
     }
-    this.paperclipRunIssueCache.set(String(runId), {
+    this.orchestoraiRunIssueCache.set(String(runId), {
       issueIds,
-      expiresAt: Date.now() + PAPERCLIP_RUN_CACHE_TTL_MS,
+      expiresAt: Date.now() + ORCHESTORAI_RUN_CACHE_TTL_MS,
     });
   }
 
-  getCachedPaperclipRunIssues(runId) {
-    pruneExpiringMap(this.paperclipRunIssueCache);
-    const entry = this.paperclipRunIssueCache.get(String(runId || ""));
+  getCachedOrchestorAIRunIssues(runId) {
+    pruneExpiringMap(this.orchestoraiRunIssueCache);
+    const entry = this.orchestoraiRunIssueCache.get(String(runId || ""));
     return entry ? entry.issueIds : null;
   }
 
-  markPaperclipEventSeen(event) {
-    pruneExpiringMap(this.paperclipSeenLiveEvents);
+  markOrchestorAIEventSeen(event) {
+    pruneExpiringMap(this.orchestoraiSeenLiveEvents);
     const idPart = String(event?.id || "").trim();
     const createdAtPart = String(event?.createdAt || "").trim();
     if (!idPart && !createdAtPart) {
       return false;
     }
     const key = `${idPart}:${createdAtPart}`;
-    if (this.paperclipSeenLiveEvents.has(key)) {
+    if (this.orchestoraiSeenLiveEvents.has(key)) {
       return true;
     }
-    this.paperclipSeenLiveEvents.set(key, {
-      expiresAt: Date.now() + PAPERCLIP_LIVE_EVENT_TTL_MS,
+    this.orchestoraiSeenLiveEvents.set(key, {
+      expiresAt: Date.now() + ORCHESTORAI_LIVE_EVENT_TTL_MS,
     });
     return false;
   }
 
-  async postPaperclipThreadReply(channel, threadTs, text) {
+  async postOrchestorAIThreadReply(channel, threadTs, text) {
     const message = String(text || "").trim();
     if (!channel || !threadTs || !message) {
       return;
@@ -691,7 +691,7 @@ export class SlackRuntime {
     this.threadParticipation.set(`${channel}:${threadTs}`, Date.now());
   }
 
-  async postPaperclipRootMessage(channel, text) {
+  async postOrchestorAIRootMessage(channel, text) {
     const message = String(text || "").trim();
     if (!channel || !message) {
       return "";
@@ -702,13 +702,13 @@ export class SlackRuntime {
     });
     const ts = String(response?.ts || "").trim();
     if (!ts) {
-      throw new Error("Slack did not return a timestamp for the Paperclip thread root");
+      throw new Error("Slack did not return a timestamp for the OrchestorAI thread root");
     }
     this.threadParticipation.set(`${channel}:${ts}`, Date.now());
     return ts;
   }
 
-  async resolvePaperclipActorName(payload) {
+  async resolveOrchestorAIActorName(payload) {
     if (!payload || payload.actorType === "system") {
       return "system";
     }
@@ -716,13 +716,13 @@ export class SlackRuntime {
       return payload.actorId === "local-board" ? "board" : String(payload.actorId || "board");
     }
     const agentId = payload.agentId || payload.actorId;
-    if (!agentId || !this.paperclipClient) {
+    if (!agentId || !this.orchestoraiClient) {
       return "";
     }
-    return await this.paperclipClient.getAgentName(agentId);
+    return await this.orchestoraiClient.getAgentName(agentId);
   }
 
-  buildPaperclipAgentNameMap(agents) {
+  buildOrchestorAIAgentNameMap(agents) {
     return new Map(
       (agents || [])
         .map((agent) => [String(agent?.id || "").trim(), String(agent?.name || "").trim()])
@@ -738,12 +738,12 @@ export class SlackRuntime {
     return String(parent?.identifier || "").trim();
   }
 
-  async maybeHandlePaperclipSummaryRequest({ event, mappedThread }) {
-    if (!this.paperclipClient) {
+  async maybeHandleOrchestorAISummaryRequest({ event, mappedThread }) {
+    if (!this.orchestoraiClient) {
       return false;
     }
 
-    const request = detectPaperclipSummaryRequest({
+    const request = detectOrchestorAISummaryRequest({
       text: event.text || "",
       mappedIssueIdentifier: mappedThread?.issueIdentifier || "",
     });
@@ -754,8 +754,8 @@ export class SlackRuntime {
     const replyThreadTs = event.thread_ts || event.ts;
 
     try {
-      const agents = await this.paperclipClient.listAgents();
-      const agentsById = this.buildPaperclipAgentNameMap(agents);
+      const agents = await this.orchestoraiClient.listAgents();
+      const agentsById = this.buildOrchestorAIAgentNameMap(agents);
 
       if (request.kind === "issue") {
         const identifiers = request.issueIdentifiers.length > 0
@@ -766,14 +766,14 @@ export class SlackRuntime {
         }
 
         if (identifiers.length === 1) {
-          const issue = await this.paperclipClient.getIssue(identifiers[0]);
-          const summary = buildPaperclipIssueSummary({
+          const issue = await this.orchestoraiClient.getIssue(identifiers[0]);
+          const summary = buildOrchestorAIIssueSummary({
             issue,
             assigneeName: issue?.assigneeAgentId ? agentsById.get(String(issue.assigneeAgentId)) || "" : "",
             projectName: String(issue?.project?.name || "").trim(),
             parentIdentifier: this.resolveIssueParentIdentifier(issue),
           });
-          await this.postPaperclipThreadReply(event.channel, replyThreadTs, summary);
+          await this.postOrchestorAIThreadReply(event.channel, replyThreadTs, summary);
           return true;
         }
 
@@ -781,7 +781,7 @@ export class SlackRuntime {
           await Promise.all(
             identifiers.map(async (identifier) => {
               try {
-                return await this.paperclipClient.getIssue(identifier);
+                return await this.orchestoraiClient.getIssue(identifier);
               } catch {
                 return null;
               }
@@ -789,29 +789,29 @@ export class SlackRuntime {
           )
         ).filter(Boolean);
 
-        const summary = buildPaperclipOverviewSummary({
+        const summary = buildOrchestorAIOverviewSummary({
           issues: matchedIssues,
           agentsById,
           scopeLabel: "requested tickets",
         });
-        await this.postPaperclipThreadReply(event.channel, replyThreadTs, summary);
+        await this.postOrchestorAIThreadReply(event.channel, replyThreadTs, summary);
         return true;
       }
 
-      let issues = await this.paperclipClient.listIssues();
+      let issues = await this.orchestoraiClient.listIssues();
       let projectName = "";
       const projectSelectors = extractProjectSelectors(event.text || "");
       if (projectSelectors.length > 0) {
-        const projects = await this.paperclipClient.listProjects();
+        const projects = await this.orchestoraiClient.listProjects();
         const project = resolveProject({
           text: event.text || "",
-          projectMappings: this.config.paperclip.projectMappings,
+          projectMappings: this.config.orchestorai.projectMappings,
           projects,
         });
 
         if (project.kind !== "match") {
           let message =
-            "I could not resolve a Paperclip project. Use `project: <project alias>` or an exact Paperclip project name.";
+            "I could not resolve a OrchestorAI project. Use `project: <project alias>` or an exact OrchestorAI project name.";
           if (project.kind === "ambiguous" && Array.isArray(project.candidates) && project.candidates.length > 0) {
             const names = project.candidates
               .map((entry) => `${entry.name} (${formatProjectAliasLabel(entry)})`)
@@ -821,7 +821,7 @@ export class SlackRuntime {
               message = `I found multiple possible projects: ${names}. Use one canonical project alias or one exact project name.`;
             }
           }
-          await this.postPaperclipThreadReply(event.channel, replyThreadTs, message);
+          await this.postOrchestorAIThreadReply(event.channel, replyThreadTs, message);
           return true;
         }
 
@@ -829,30 +829,30 @@ export class SlackRuntime {
         issues = issues.filter((issue) => String(issue?.projectId || "") === String(project.project.id || ""));
       }
 
-      const summary = buildPaperclipOverviewSummary({
+      const summary = buildOrchestorAIOverviewSummary({
         issues,
         agentsById,
         projectName,
       });
-      await this.postPaperclipThreadReply(event.channel, replyThreadTs, summary);
+      await this.postOrchestorAIThreadReply(event.channel, replyThreadTs, summary);
       return true;
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       const missingIdentifier = request.kind === "issue" ? request.issueIdentifiers[0] || "" : "";
       const message = /issue not found/i.test(reason) && missingIdentifier
-        ? `I could not find Paperclip issue ${missingIdentifier}.`
-        : `Paperclip summary failed: ${reason}`;
-      await this.postPaperclipThreadReply(event.channel, replyThreadTs, message);
+        ? `I could not find OrchestorAI issue ${missingIdentifier}.`
+        : `OrchestorAI summary failed: ${reason}`;
+      await this.postOrchestorAIThreadReply(event.channel, replyThreadTs, message);
       return true;
     }
   }
 
-  async maybeHandlePaperclipCommentRequest({ event, mappedThread }) {
-    if (!this.paperclipClient) {
+  async maybeHandleOrchestorAICommentRequest({ event, mappedThread }) {
+    if (!this.orchestoraiClient) {
       return false;
     }
 
-    const request = detectPaperclipCommentRequest({
+    const request = detectOrchestorAICommentRequest({
       text: event.text || "",
       mappedIssueIdentifier: mappedThread?.issueIdentifier || "",
     });
@@ -869,13 +869,13 @@ export class SlackRuntime {
       }
 
       const [issue, comments, agents] = await Promise.all([
-        this.paperclipClient.getIssue(identifier),
-        this.paperclipClient.listIssueComments(identifier),
-        this.paperclipClient.listAgents(),
+        this.orchestoraiClient.getIssue(identifier),
+        this.orchestoraiClient.listIssueComments(identifier),
+        this.orchestoraiClient.listAgents(),
       ]);
 
       const latestComment = Array.isArray(comments) && comments.length > 0 ? comments[0] : null;
-      const agentsById = this.buildPaperclipAgentNameMap(agents);
+      const agentsById = this.buildOrchestorAIAgentNameMap(agents);
       const authorName = latestComment?.authorAgentId
         ? agentsById.get(String(latestComment.authorAgentId)) || ""
         : latestComment?.authorUserId
@@ -884,26 +884,26 @@ export class SlackRuntime {
             : String(latestComment.authorUserId)
           : "";
 
-      const summary = buildPaperclipLatestCommentSummary({
+      const summary = buildOrchestorAILatestCommentSummary({
         identifier: issue?.identifier || identifier,
         comment: latestComment,
         authorName,
       });
-      await this.postPaperclipThreadReply(event.channel, replyThreadTs, summary);
+      await this.postOrchestorAIThreadReply(event.channel, replyThreadTs, summary);
       return true;
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       const missingIdentifier = request.issueIdentifiers[0] || "";
       const message = /issue not found/i.test(reason) && missingIdentifier
-        ? `I could not find Paperclip issue ${missingIdentifier}.`
-        : `Paperclip comment lookup failed: ${reason}`;
-      await this.postPaperclipThreadReply(event.channel, replyThreadTs, message);
+        ? `I could not find OrchestorAI issue ${missingIdentifier}.`
+        : `OrchestorAI comment lookup failed: ${reason}`;
+      await this.postOrchestorAIThreadReply(event.channel, replyThreadTs, message);
       return true;
     }
   }
 
-  async ensurePaperclipThreadMappingForIssue(issueId, options = {}, visited = new Set()) {
-    if (!issueId || !this.paperclipThreadStore || !this.paperclipClient) {
+  async ensureOrchestorAIThreadMappingForIssue(issueId, options = {}, visited = new Set()) {
+    if (!issueId || !this.orchestoraiThreadStore || !this.orchestoraiClient) {
       return null;
     }
 
@@ -912,7 +912,7 @@ export class SlackRuntime {
       return null;
     }
 
-    const existing = this.paperclipThreadStore.getMappingByIssueId(normalizedIssueId);
+    const existing = this.orchestoraiThreadStore.getMappingByIssueId(normalizedIssueId);
     if (existing) {
       return existing;
     }
@@ -921,7 +921,7 @@ export class SlackRuntime {
       return null;
     }
 
-    const inFlight = this.paperclipThreadProvisioning.get(normalizedIssueId);
+    const inFlight = this.orchestoraiThreadProvisioning.get(normalizedIssueId);
     if (inFlight) {
       return await inFlight;
     }
@@ -929,7 +929,7 @@ export class SlackRuntime {
     visited.add(normalizedIssueId);
 
     const task = (async () => {
-      const issue = await this.paperclipClient.getIssue(normalizedIssueId);
+      const issue = await this.orchestoraiClient.getIssue(normalizedIssueId);
       if (!issue?.id) {
         return null;
       }
@@ -941,12 +941,12 @@ export class SlackRuntime {
         }
 
         const assigneeName =
-          issue.assigneeAgentId && this.paperclipClient
-            ? await this.paperclipClient.getAgentName(issue.assigneeAgentId)
+          issue.assigneeAgentId && this.orchestoraiClient
+            ? await this.orchestoraiClient.getAgentName(issue.assigneeAgentId)
             : "";
         const projectName = String(issue.project?.name || "").trim();
         const issueIdentifier = String(issue.identifier || issue.id).trim();
-        const threadTs = await this.postPaperclipRootMessage(
+        const threadTs = await this.postOrchestorAIRootMessage(
           fallbackChannelId,
           formatChildIssueThreadRootMessage({
             childIdentifier: issueIdentifier,
@@ -957,10 +957,10 @@ export class SlackRuntime {
           }),
         );
 
-        const mapping = this.paperclipThreadStore.putMapping({
+        const mapping = this.orchestoraiThreadStore.putMapping({
           channelId: fallbackChannelId,
           threadTs,
-          companyId: issue.companyId || this.config.paperclip.companyId,
+          companyId: issue.companyId || this.config.orchestorai.companyId,
           issueId: issue.id,
           issueIdentifier: issue.identifier,
           issueTitle: issue.title,
@@ -975,27 +975,27 @@ export class SlackRuntime {
 
         this.log(
           "info",
-          `paperclip top-level issue thread created issue=${issue.id} thread=${fallbackChannelId}:${threadTs}`,
+          `orchestorai top-level issue thread created issue=${issue.id} thread=${fallbackChannelId}:${threadTs}`,
         );
         return mapping;
       }
 
       const parentMapping =
-        this.paperclipThreadStore.getMappingByIssueId(issue.parentId) ||
-        (await this.ensurePaperclipThreadMappingForIssue(issue.parentId, options, visited));
+        this.orchestoraiThreadStore.getMappingByIssueId(issue.parentId) ||
+        (await this.ensureOrchestorAIThreadMappingForIssue(issue.parentId, options, visited));
       if (!parentMapping) {
         return null;
       }
 
       const assigneeName =
-        issue.assigneeAgentId && this.paperclipClient
-          ? await this.paperclipClient.getAgentName(issue.assigneeAgentId)
+        issue.assigneeAgentId && this.orchestoraiClient
+          ? await this.orchestoraiClient.getAgentName(issue.assigneeAgentId)
           : "";
       const childIdentifier = String(issue.identifier || issue.id).trim();
       const parentIdentifier = String(parentMapping.issueIdentifier || "").trim();
       const projectName = String(issue.project?.name || parentMapping.projectName || "").trim();
 
-      const threadTs = await this.postPaperclipRootMessage(
+      const threadTs = await this.postOrchestorAIRootMessage(
         parentMapping.channelId,
         formatChildIssueThreadRootMessage({
           childIdentifier,
@@ -1006,10 +1006,10 @@ export class SlackRuntime {
         }),
       );
 
-      const mapping = this.paperclipThreadStore.putMapping({
+      const mapping = this.orchestoraiThreadStore.putMapping({
         channelId: parentMapping.channelId,
         threadTs,
-        companyId: issue.companyId || parentMapping.companyId || this.config.paperclip.companyId,
+        companyId: issue.companyId || parentMapping.companyId || this.config.orchestorai.companyId,
         issueId: issue.id,
         issueIdentifier: issue.identifier,
         issueTitle: issue.title,
@@ -1031,44 +1031,44 @@ export class SlackRuntime {
           parentIdentifier,
         });
         if (parentNotice) {
-          await this.postPaperclipThreadReply(parentMapping.channelId, parentMapping.threadTs, parentNotice);
+          await this.postOrchestorAIThreadReply(parentMapping.channelId, parentMapping.threadTs, parentNotice);
         }
       }
 
       this.log(
         "info",
-        `paperclip child issue thread created issue=${issue.id} thread=${parentMapping.channelId}:${threadTs} parent=${parentMapping.issueId}`,
+        `orchestorai child issue thread created issue=${issue.id} thread=${parentMapping.channelId}:${threadTs} parent=${parentMapping.issueId}`,
       );
       return mapping;
     })();
 
-    this.paperclipThreadProvisioning.set(normalizedIssueId, task);
+    this.orchestoraiThreadProvisioning.set(normalizedIssueId, task);
     try {
       return await task;
     } finally {
-      if (this.paperclipThreadProvisioning.get(normalizedIssueId) === task) {
-        this.paperclipThreadProvisioning.delete(normalizedIssueId);
+      if (this.orchestoraiThreadProvisioning.get(normalizedIssueId) === task) {
+        this.orchestoraiThreadProvisioning.delete(normalizedIssueId);
       }
     }
   }
 
-  async resolvePaperclipThreadMappingsForRun(runId) {
-    if (!runId || !this.paperclipThreadStore || !this.paperclipClient) {
+  async resolveOrchestorAIThreadMappingsForRun(runId) {
+    if (!runId || !this.orchestoraiThreadStore || !this.orchestoraiClient) {
       return [];
     }
 
-    let issueIds = this.getCachedPaperclipRunIssues(runId);
+    let issueIds = this.getCachedOrchestorAIRunIssues(runId);
     if (!issueIds) {
-      const issues = await this.paperclipClient.getRunIssues(runId);
-      this.rememberPaperclipRunIssues(runId, issues);
-      issueIds = this.getCachedPaperclipRunIssues(runId) || [];
+      const issues = await this.orchestoraiClient.getRunIssues(runId);
+      this.rememberOrchestorAIRunIssues(runId, issues);
+      issueIds = this.getCachedOrchestorAIRunIssues(runId) || [];
     }
 
     const mappings = [];
     for (const issueId of issueIds) {
       const mapping =
-        this.paperclipThreadStore.getMappingByIssueId(issueId) ||
-        (await this.ensurePaperclipThreadMappingForIssue(issueId));
+        this.orchestoraiThreadStore.getMappingByIssueId(issueId) ||
+        (await this.ensureOrchestorAIThreadMappingForIssue(issueId));
       if (mapping) {
         mappings.push(mapping);
       }
@@ -1076,18 +1076,18 @@ export class SlackRuntime {
     return mappings;
   }
 
-  async handlePaperclipLiveEvent(event) {
-    if (!this.isPaperclipEnabled()) {
+  async handleOrchestorAILiveEvent(event) {
+    if (!this.isOrchestorAIEnabled()) {
       return;
     }
-    if (!event || this.markPaperclipEventSeen(event)) {
+    if (!event || this.markOrchestorAIEventSeen(event)) {
       return;
     }
 
     const payload = event.payload && typeof event.payload === "object" ? event.payload : {};
     this.log(
       "debug",
-      `paperclip event type=${event.type || "unknown"} id=${String(event.id || "")} entity=${String(payload.entityType || "")}:${String(payload.entityId || "")} action=${String(payload.action || "")} run=${String(payload.runId || "")}`,
+      `orchestorai event type=${event.type || "unknown"} id=${String(event.id || "")} entity=${String(payload.entityType || "")}:${String(payload.entityId || "")} action=${String(payload.action || "")} run=${String(payload.runId || "")}`,
     );
 
     if (event.type === "activity.logged") {
@@ -1097,10 +1097,10 @@ export class SlackRuntime {
 
       if (payload.action === "issue.created") {
         if (payload.runId) {
-          this.rememberPaperclipRunIssues(payload.runId, [{ issueId: payload.entityId }]);
+          this.rememberOrchestorAIRunIssues(payload.runId, [{ issueId: payload.entityId }]);
         }
-        const fallbackChannelId = this.paperclipThreadStore.getPreferredChannel(this.config.paperclip.companyId);
-        await this.ensurePaperclipThreadMappingForIssue(payload.entityId, {
+        const fallbackChannelId = this.orchestoraiThreadStore.getPreferredChannel(this.config.orchestorai.companyId);
+        await this.ensureOrchestorAIThreadMappingForIssue(payload.entityId, {
           notifyParentThread: true,
           allowTopLevelRoot: payload.actorType === "user",
           fallbackChannelId,
@@ -1113,24 +1113,24 @@ export class SlackRuntime {
       }
 
       const mapping =
-        this.paperclipThreadStore.getMappingByIssueId(payload.entityId) ||
-        (await this.ensurePaperclipThreadMappingForIssue(payload.entityId));
+        this.orchestoraiThreadStore.getMappingByIssueId(payload.entityId) ||
+        (await this.ensureOrchestorAIThreadMappingForIssue(payload.entityId));
       if (!mapping) {
         return;
       }
 
       if (payload.runId) {
-        this.rememberPaperclipRunIssues(payload.runId, [{ issueId: payload.entityId }]);
+        this.rememberOrchestorAIRunIssues(payload.runId, [{ issueId: payload.entityId }]);
       }
 
       if (payload.action === "issue.comment_added") {
         const fingerprint = fingerprintIssueComment(payload.details?.bodySnippet || "");
-        if (fingerprint && this.paperclipThreadStore.hasRecentSlackFingerprint(payload.entityId, fingerprint)) {
+        if (fingerprint && this.orchestoraiThreadStore.hasRecentSlackFingerprint(payload.entityId, fingerprint)) {
           return;
         }
       }
 
-      const actorName = await this.resolvePaperclipActorName(payload);
+      const actorName = await this.resolveOrchestorAIActorName(payload);
       const message = formatActivityNotification({
         action: payload.action,
         identifier: mapping.issueIdentifier,
@@ -1140,7 +1140,7 @@ export class SlackRuntime {
       if (!message) {
         return;
       }
-      await this.postPaperclipThreadReply(mapping.channelId, mapping.threadTs, message);
+      await this.postOrchestorAIThreadReply(mapping.channelId, mapping.threadTs, message);
       return;
     }
 
@@ -1148,13 +1148,13 @@ export class SlackRuntime {
       return;
     }
 
-    const mappings = await this.resolvePaperclipThreadMappingsForRun(payload.runId);
+    const mappings = await this.resolveOrchestorAIThreadMappingsForRun(payload.runId);
     if (mappings.length === 0) {
       return;
     }
 
     const agentName =
-      payload.agentId && this.paperclipClient ? await this.paperclipClient.getAgentName(payload.agentId) : "";
+      payload.agentId && this.orchestoraiClient ? await this.orchestoraiClient.getAgentName(payload.agentId) : "";
     for (const mapping of mappings) {
       const message = formatRunNotification({
         eventType: event.type,
@@ -1166,27 +1166,27 @@ export class SlackRuntime {
       if (!message) {
         continue;
       }
-      await this.postPaperclipThreadReply(mapping.channelId, mapping.threadTs, message);
+      await this.postOrchestorAIThreadReply(mapping.channelId, mapping.threadTs, message);
     }
   }
 
-  async startPaperclipBridge() {
-    if (!this.isPaperclipEnabled()) {
+  async startOrchestorAIBridge() {
+    if (!this.isOrchestorAIEnabled()) {
       return;
     }
-    await this.paperclipClient.listAgents({ force: true });
-    this.paperclipStopLiveEvents = this.paperclipClient.subscribeLiveEvents({
+    await this.orchestoraiClient.listAgents({ force: true });
+    this.orchestoraiStopLiveEvents = this.orchestoraiClient.subscribeLiveEvents({
       onOpen: () => {
-        this.log("info", "paperclip live events connected");
+        this.log("info", "orchestorai live events connected");
       },
       onClose: () => {
-        this.log("warn", "paperclip live events disconnected");
+        this.log("warn", "orchestorai live events disconnected");
       },
       onError: (err) => {
-        this.log("warn", `paperclip live events error: ${String(err)}`);
+        this.log("warn", `orchestorai live events error: ${String(err)}`);
       },
       onEvent: async (event) => {
-        await this.handlePaperclipLiveEvent(event);
+        await this.handleOrchestorAILiveEvent(event);
       },
     });
   }
@@ -1982,17 +1982,17 @@ export class SlackRuntime {
     }
   }
 
-  async maybeHandlePaperclipMessage(params) {
+  async maybeHandleOrchestorAIMessage(params) {
     const { event, options, channelType, senderId, senderName, channelInfo } = params;
-    if (!this.isPaperclipEnabled()) {
+    if (!this.isOrchestorAIEnabled()) {
       return false;
     }
-    const mappedThread = this.getMappedPaperclipThread(event);
+    const mappedThread = this.getMappedOrchestorAIThread(event);
     const creationThreadTs = event.thread_ts || event.ts;
     const replyThreadTs = mappedThread?.threadTs || event.thread_ts || event.ts;
 
     try {
-      const handledCommentLookup = await this.maybeHandlePaperclipCommentRequest({
+      const handledCommentLookup = await this.maybeHandleOrchestorAICommentRequest({
         event,
         mappedThread,
       });
@@ -2000,7 +2000,7 @@ export class SlackRuntime {
         return true;
       }
 
-      const handledSummary = await this.maybeHandlePaperclipSummaryRequest({
+      const handledSummary = await this.maybeHandleOrchestorAISummaryRequest({
         event,
         mappedThread,
       });
@@ -2009,26 +2009,26 @@ export class SlackRuntime {
       }
 
       if (mappedThread) {
-        const hasTrigger = hasPaperclipTrigger({
+        const hasTrigger = hasOrchestorAITrigger({
           text: event.text || "",
           botUserId: this.botUserId,
-          triggerMentions: this.config.paperclip.triggerMentions,
+          triggerMentions: this.config.orchestorai.triggerMentions,
         });
         if (!hasTrigger) {
-          this.log("debug", `paperclip bypass: mapped thread without trigger ${event.channel}:${event.thread_ts}`);
+          this.log("debug", `orchestorai bypass: mapped thread without trigger ${event.channel}:${event.thread_ts}`);
           return false;
         }
 
         const nestedTaskRequest = detectTaskRequest({
           text: event.text || "",
-          taskPrefix: this.config.paperclip.taskPrefix,
-          triggerMentions: this.config.paperclip.triggerMentions,
+          taskPrefix: this.config.orchestorai.taskPrefix,
+          triggerMentions: this.config.orchestorai.triggerMentions,
         });
         if (nestedTaskRequest?.title) {
-          await this.postPaperclipThreadReply(
+          await this.postOrchestorAIThreadReply(
             mappedThread.channelId,
             mappedThread.threadTs,
-            `This Slack thread is already linked to ${mappedThread.issueIdentifier}. Start a new Slack thread to create another Paperclip issue.`,
+            `This Slack thread is already linked to ${mappedThread.issueIdentifier}. Start a new Slack thread to create another OrchestorAI issue.`,
           );
           return true;
         }
@@ -2036,11 +2036,11 @@ export class SlackRuntime {
         const commentBody = stripBotMention(
           event.text || "",
           this.botUserId,
-          this.config.paperclip.triggerMentions,
+          this.config.orchestorai.triggerMentions,
         );
         if (!commentBody) {
           if (!Array.isArray(event.files) || event.files.length === 0) {
-            await this.postPaperclipThreadReply(
+            await this.postOrchestorAIThreadReply(
               mappedThread.channelId,
               mappedThread.threadTs,
               `Mention me with text to sync a comment to ${mappedThread.issueIdentifier}.`,
@@ -2049,12 +2049,12 @@ export class SlackRuntime {
           return true;
         }
 
-        await this.paperclipClient.addIssueComment(mappedThread.issueId, commentBody);
+        await this.orchestoraiClient.addIssueComment(mappedThread.issueId, commentBody);
         const fingerprint = fingerprintIssueComment(commentBody);
         if (fingerprint) {
-          this.paperclipThreadStore.rememberSlackFingerprint(mappedThread.issueId, fingerprint);
+          this.orchestoraiThreadStore.rememberSlackFingerprint(mappedThread.issueId, fingerprint);
         }
-        this.log("debug", `paperclip comment synced issue=${mappedThread.issueId} thread=${mappedThread.threadTs}`);
+        this.log("debug", `orchestorai comment synced issue=${mappedThread.issueId} thread=${mappedThread.threadTs}`);
         return true;
       }
 
@@ -2065,10 +2065,10 @@ export class SlackRuntime {
         return false;
       }
 
-      const hasCreationTrigger = hasPaperclipTrigger({
+      const hasCreationTrigger = hasOrchestorAITrigger({
         text: event.text || "",
         botUserId: this.botUserId,
-        triggerMentions: this.config.paperclip.triggerMentions,
+        triggerMentions: this.config.orchestorai.triggerMentions,
       });
       if (!hasCreationTrigger) {
         return false;
@@ -2076,41 +2076,41 @@ export class SlackRuntime {
 
       const taskRequest = detectTaskRequest({
         text: event.text || "",
-        taskPrefix: this.config.paperclip.taskPrefix,
-        triggerMentions: this.config.paperclip.triggerMentions,
+        taskPrefix: this.config.orchestorai.taskPrefix,
+        triggerMentions: this.config.orchestorai.triggerMentions,
       });
       if (!taskRequest) {
         return false;
       }
 
       if (!taskRequest.title) {
-        await this.postPaperclipThreadReply(
+        await this.postOrchestorAIThreadReply(
           event.channel,
           creationThreadTs,
-          `Task creation needs text after \`${this.config.paperclip.taskPrefix}\`.`,
+          `Task creation needs text after \`${this.config.orchestorai.taskPrefix}\`.`,
         );
         return true;
       }
 
-      const agents = await this.paperclipClient.listAgents();
+      const agents = await this.orchestoraiClient.listAgents();
       const assignee = resolveAssignee({
         text: event.text || "",
-        agentMappings: this.config.paperclip.agentMappings,
+        agentMappings: this.config.orchestorai.agentMappings,
         agents,
       });
 
       if (assignee.kind !== "match") {
-        let message = "I could not resolve a Paperclip assignee. Mention the agent's Slack alias such as `@qa`, or use the agent's exact Paperclip name.";
+        let message = "I could not resolve a OrchestorAI assignee. Mention the agent's Slack alias such as `@qa`, or use the agent's exact OrchestorAI name.";
         if (assignee.kind === "ambiguous" && Array.isArray(assignee.candidates) && assignee.candidates.length > 0) {
           const names = assignee.candidates
             .map((agent) => `${agent.name} (${formatAgentAliasLabel(agent)})`)
             .filter(Boolean)
             .join(", ");
           if (names) {
-            message = `I found multiple possible assignees: ${names}. Mention exactly one canonical alias or one exact Paperclip agent name.`;
+            message = `I found multiple possible assignees: ${names}. Mention exactly one canonical alias or one exact OrchestorAI agent name.`;
           }
         }
-        await this.postPaperclipThreadReply(event.channel, creationThreadTs, message);
+        await this.postOrchestorAIThreadReply(event.channel, creationThreadTs, message);
         return true;
       }
 
@@ -2120,16 +2120,16 @@ export class SlackRuntime {
         reason: "no_project_selector",
       };
       if (projectSelectors.length > 0) {
-        const projects = await this.paperclipClient.listProjects();
+        const projects = await this.orchestoraiClient.listProjects();
         project = resolveProject({
           text: event.text || "",
-          projectMappings: this.config.paperclip.projectMappings,
+          projectMappings: this.config.orchestorai.projectMappings,
           projects,
         });
 
         if (project.kind !== "match") {
           let message =
-            "I could not resolve a Paperclip project. Use `project: <project alias>` or an exact Paperclip project name.";
+            "I could not resolve a OrchestorAI project. Use `project: <project alias>` or an exact OrchestorAI project name.";
           if (
             project.kind === "ambiguous" &&
             Array.isArray(project.candidates) &&
@@ -2143,12 +2143,12 @@ export class SlackRuntime {
               message = `I found multiple possible projects: ${names}. Use one canonical project alias or one exact project name.`;
             }
           }
-          await this.postPaperclipThreadReply(event.channel, creationThreadTs, message);
+          await this.postOrchestorAIThreadReply(event.channel, creationThreadTs, message);
           return true;
         }
       }
 
-      const issue = await this.paperclipClient.createIssue({
+      const issue = await this.orchestoraiClient.createIssue({
         title: taskRequest.title,
         description: buildIssueDescription({
           text: event.text || "",
@@ -2165,10 +2165,10 @@ export class SlackRuntime {
         ...(project.kind === "match" ? { projectId: project.project.id } : {}),
       });
 
-      this.paperclipThreadStore.putMapping({
+      this.orchestoraiThreadStore.putMapping({
         channelId: event.channel,
         threadTs: creationThreadTs,
-        companyId: this.config.paperclip.companyId,
+        companyId: this.config.orchestorai.companyId,
         issueId: issue.id,
         issueIdentifier: issue.identifier,
         issueTitle: issue.title,
@@ -2180,17 +2180,17 @@ export class SlackRuntime {
       });
 
       const projectSuffix = project.kind === "match" ? ` in ${project.project.name}` : "";
-      await this.postPaperclipThreadReply(
+      await this.postOrchestorAIThreadReply(
         event.channel,
         creationThreadTs,
-        `Created Paperclip issue ${issue.identifier}${projectSuffix} and assigned it to ${assignee.agent.name}.`,
+        `Created OrchestorAI issue ${issue.identifier}${projectSuffix} and assigned it to ${assignee.agent.name}.`,
       );
-      this.log("info", `paperclip issue created issue=${issue.id} thread=${event.channel}:${creationThreadTs}`);
+      this.log("info", `orchestorai issue created issue=${issue.id} thread=${event.channel}:${creationThreadTs}`);
       return true;
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      this.log("error", `paperclip bridge failed: ${reason}`);
-      await this.postPaperclipThreadReply(event.channel, replyThreadTs, `Paperclip action failed: ${reason}`);
+      this.log("error", `orchestorai bridge failed: ${reason}`);
+      await this.postOrchestorAIThreadReply(event.channel, replyThreadTs, `OrchestorAI action failed: ${reason}`);
       return true;
     }
   }
@@ -2280,13 +2280,13 @@ export class SlackRuntime {
     }
 
     if (channelType === "channel" || channelType === "group" || channelType === "im") {
-      this.rememberPaperclipPreferredChannel({
+      this.rememberOrchestorAIPreferredChannel({
         channelId: event.channel,
         channelType,
         event,
         options,
       });
-      const handledByPaperclip = await this.maybeHandlePaperclipMessage({
+      const handledByOrchestorAI = await this.maybeHandleOrchestorAIMessage({
         event,
         options,
         channelType,
@@ -2294,7 +2294,7 @@ export class SlackRuntime {
         senderName,
         channelInfo,
       });
-      if (handledByPaperclip) {
+      if (handledByOrchestorAI) {
         return;
       }
     }
@@ -2776,11 +2776,11 @@ export class SlackRuntime {
     });
 
     await this.app.start(this.config.slack.port);
-    await this.startPaperclipBridge();
+    await this.startOrchestorAIBridge();
 
     this.log(
       "info",
-      `slack-codex-bot started mode=${this.config.slack.mode} port=${this.config.slack.port} botUserId=${this.botUserId || "unknown"} teamId=${this.teamId || "unknown"} appId=${this.expectedAppId || "unknown"} paperclip=${this.isPaperclipEnabled() ? "enabled" : "disabled"}`,
+      `slack-codex-bot started mode=${this.config.slack.mode} port=${this.config.slack.port} botUserId=${this.botUserId || "unknown"} teamId=${this.teamId || "unknown"} appId=${this.expectedAppId || "unknown"} orchestorai=${this.isOrchestorAIEnabled() ? "enabled" : "disabled"}`,
     );
   }
 }

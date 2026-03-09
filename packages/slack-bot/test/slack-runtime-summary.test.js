@@ -2,13 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  buildPaperclipLatestCommentSummary,
-  buildPaperclipIssueSummary,
-  buildPaperclipOverviewSummary,
+  buildOrchestorAILatestCommentSummary,
+  buildOrchestorAIIssueSummary,
+  buildOrchestorAIOverviewSummary,
 } from "../src/slack-runtime.js";
 
-test("buildPaperclipIssueSummary renders a concise ticket summary", () => {
-  const summary = buildPaperclipIssueSummary({
+test("buildOrchestorAIIssueSummary renders a concise ticket summary", () => {
+  const summary = buildOrchestorAIIssueSummary({
     issue: {
       identifier: "AND-9",
       title: "Implement OTP/email verification gate on app restart",
@@ -28,8 +28,8 @@ test("buildPaperclipIssueSummary renders a concise ticket summary", () => {
   assert.match(summary, /Parent: AND-8\. Brief: Implement the approved fix to prevent bypassing OTP\/email verification after app kill \+ restart\./);
 });
 
-test("buildPaperclipOverviewSummary renders counts plus active and completed tickets", () => {
-  const summary = buildPaperclipOverviewSummary({
+test("buildOrchestorAIOverviewSummary renders counts plus active and completed tickets", () => {
+  const summary = buildOrchestorAIOverviewSummary({
     issues: [
       {
         identifier: "AND-9",
@@ -59,8 +59,8 @@ test("buildPaperclipOverviewSummary renders counts plus active and completed tic
   assert.match(summary, /Recent completions: AND-14 Name Agents \(done, Naveen \(CEO\)\)/);
 });
 
-test("buildPaperclipLatestCommentSummary renders the newest comment as full markdown-friendly text", () => {
-  const summary = buildPaperclipLatestCommentSummary({
+test("buildOrchestorAILatestCommentSummary renders the newest comment as full markdown-friendly text", () => {
+  const summary = buildOrchestorAILatestCommentSummary({
     identifier: "AND-12",
     authorName: "CTO",
     comment: {
@@ -75,8 +75,8 @@ test("buildPaperclipLatestCommentSummary renders the newest comment as full mark
   );
 });
 
-test("buildPaperclipLatestCommentSummary handles tickets with no comments", () => {
-  const summary = buildPaperclipLatestCommentSummary({
+test("buildOrchestorAILatestCommentSummary handles tickets with no comments", () => {
+  const summary = buildOrchestorAILatestCommentSummary({
     identifier: "AND-15",
     comment: null,
   });

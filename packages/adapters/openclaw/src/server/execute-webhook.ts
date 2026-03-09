@@ -1,4 +1,4 @@
-import type { AdapterExecutionContext, AdapterExecutionResult } from "@paperclipai/adapter-utils";
+import type { AdapterExecutionContext, AdapterExecutionResult } from "@orchestorai/adapter-utils";
 import {
   appendWakeText,
   appendWakeTextToOpenResponsesInput,
@@ -75,9 +75,9 @@ function buildOpenResponsesWebhookBody(input: {
     input: openResponsesInput,
     metadata: {
       ...toStringRecord(state.payloadTemplate.metadata),
-      ...state.paperclipEnv,
-      paperclip_session_key: state.sessionKey,
-      paperclip_stream_transport: "webhook",
+      ...state.orchestoraiEnv,
+      orchestorai_session_key: state.sessionKey,
+      orchestorai_stream_transport: "webhook",
     },
   };
 }
@@ -153,11 +153,11 @@ function buildLegacyWebhookBody(input: {
     stream: false,
     sessionKey: state.sessionKey,
     text: payloadText,
-    paperclip: {
+    orchestorai: {
       ...state.wakePayload,
       sessionKey: state.sessionKey,
       streamTransport: "webhook",
-      env: state.paperclipEnv,
+      env: state.orchestoraiEnv,
       context,
     },
   };

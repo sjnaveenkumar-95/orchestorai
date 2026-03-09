@@ -1,9 +1,9 @@
 {
-  "name": "@paperclipai/slack-bot",
+  "name": "@orchestorai/slack-bot",
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "Slack + Codex bot with Paperclip task bridge",
+  "description": "Slack + Codex bot with OrchestorAI task bridge",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

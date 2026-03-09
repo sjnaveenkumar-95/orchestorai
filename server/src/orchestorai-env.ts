@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parse as parseEnvFileContents } from "dotenv";
-import { resolvePaperclipEnvPath } from "./paths.js";
+import { resolveOrchestorAIEnvPath } from "./paths.js";
 
 function isNonEmpty(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
@@ -9,13 +9,13 @@ function isNonEmpty(value: unknown): value is string {
 
 function renderEnvFile(entries: Record<string, string>) {
   return [
-    "# Paperclip environment variables",
+    "# OrchestorAI environment variables",
     ...Object.entries(entries).map(([key, value]) => `${key}=${value}`),
     "",
   ].join("\n");
 }
 
-export function readPaperclipEnvEntries(filePath = resolvePaperclipEnvPath()): Record<string, string> {
+export function readOrchestorAIEnvEntries(filePath = resolveOrchestorAIEnvPath()): Record<string, string> {
   if (!existsSync(filePath)) {
     return {};
   }
@@ -27,18 +27,18 @@ export function readPaperclipEnvEntries(filePath = resolvePaperclipEnvPath()): R
   }
 }
 
-export function loadPaperclipEnvFile(
+export function loadOrchestorAIEnvFile(
   options: {
     filePath?: string;
     overrideKeys?: string[];
   } = {},
 ): { filePath: string; loadedKeys: string[] } | null {
-  const filePath = options.filePath ?? resolvePaperclipEnvPath();
+  const filePath = options.filePath ?? resolveOrchestorAIEnvPath();
   if (!existsSync(filePath)) {
     return null;
   }
 
-  const entries = readPaperclipEnvEntries(filePath);
+  const entries = readOrchestorAIEnvEntries(filePath);
   const overrideKeys = new Set(options.overrideKeys ?? []);
   const loadedKeys: string[] = [];
 
@@ -56,11 +56,11 @@ export function loadPaperclipEnvFile(
   return { filePath, loadedKeys };
 }
 
-export function writePaperclipEnvEntries(
+export function writeOrchestorAIEnvEntries(
   nextEntries: Record<string, string>,
-  filePath = resolvePaperclipEnvPath(),
+  filePath = resolveOrchestorAIEnvPath(),
 ): void {
-  const current = readPaperclipEnvEntries(filePath);
+  const current = readOrchestorAIEnvEntries(filePath);
   const merged = { ...current };
 
   for (const [key, rawValue] of Object.entries(nextEntries)) {

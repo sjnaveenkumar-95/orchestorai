@@ -182,7 +182,7 @@ console.log(names.join('\n'));
   else
     echo "Promoted all packages to @latest at v$NEW_VERSION"
     echo ""
-    echo "Verify: npm view paperclipai@latest version"
+    echo "Verify: npm view orchestorai@latest version"
     echo ""
     echo "To push:"
     echo "  git push && git push origin v$NEW_VERSION"
@@ -273,16 +273,16 @@ echo "==> Step 4/7: Building all packages..."
 cd "$REPO_ROOT"
 
 # Build packages in dependency order (excluding CLI)
-pnpm --filter @paperclipai/shared build
-pnpm --filter @paperclipai/adapter-utils build
-pnpm --filter @paperclipai/db build
-pnpm --filter @paperclipai/adapter-claude-local build
-pnpm --filter @paperclipai/adapter-codex-local build
-pnpm --filter @paperclipai/adapter-openclaw build
-pnpm --filter @paperclipai/server build
+pnpm --filter @orchestorai/shared build
+pnpm --filter @orchestorai/adapter-utils build
+pnpm --filter @orchestorai/db build
+pnpm --filter @orchestorai/adapter-claude-local build
+pnpm --filter @orchestorai/adapter-codex-local build
+pnpm --filter @orchestorai/adapter-openclaw build
+pnpm --filter @orchestorai/server build
 
 # Build UI and bundle into server package for static serving
-pnpm --filter @paperclipai/ui build
+pnpm --filter @orchestorai/ui build
 rm -rf "$REPO_ROOT/server/ui-dist"
 cp -r "$REPO_ROOT/ui/dist" "$REPO_ROOT/server/ui-dist"
 
@@ -397,7 +397,7 @@ if [ "$canary" = true ]; then
   else
     echo "Published canary at v$NEW_VERSION"
     echo ""
-    echo "Verify: npm view paperclipai@canary version"
+    echo "Verify: npm view orchestorai@canary version"
     echo ""
     echo "To promote to latest:"
     echo "  ./scripts/release.sh --promote $NEW_VERSION"
@@ -417,5 +417,5 @@ else
   echo "To push:"
   echo "  git push && git push origin v$NEW_VERSION"
   echo ""
-  echo "GitHub Release: https://github.com/cryppadotta/paperclip/releases/tag/v$NEW_VERSION"
+  echo "GitHub Release: https://github.com/cryppadotta/orchestorai/releases/tag/v$NEW_VERSION"
 fi

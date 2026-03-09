@@ -1,5 +1,5 @@
-export type InstanceRuntimeSecretSource = "paperclip_env" | "process_env" | "unset";
-export type InstanceRuntimeValueSource = "paperclip_env" | "process_env" | "config_file" | "unset";
+export type InstanceRuntimeSecretSource = "orchestorai_env" | "process_env" | "unset";
+export type InstanceRuntimeValueSource = "orchestorai_env" | "process_env" | "config_file" | "unset";
 
 export interface InstanceRuntimeSecretStatus {
   envKey: string;
