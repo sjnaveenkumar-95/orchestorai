@@ -7,6 +7,7 @@ export {
   isClaudeUnknownSessionError,
 } from "./parse.js";
 import type { AdapterSessionCodec } from "@orchestorai/adapter-utils";
+import { normalizeLegacyLocalAdapterSessionParams } from "@orchestorai/adapter-utils/server-utils";
 
 function readNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -15,7 +16,7 @@ function readNonEmptyString(value: unknown): string | null {
 export const sessionCodec: AdapterSessionCodec = {
   deserialize(raw: unknown) {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
-    const record = raw as Record<string, unknown>;
+    const record = normalizeLegacyLocalAdapterSessionParams(raw as Record<string, unknown>) ?? {};
     const sessionId = readNonEmptyString(record.sessionId) ?? readNonEmptyString(record.session_id);
     if (!sessionId) return null;
     const cwd =
@@ -35,15 +36,24 @@ export const sessionCodec: AdapterSessionCodec = {
   },
   serialize(params: Record<string, unknown> | null) {
     if (!params) return null;
-    const sessionId = readNonEmptyString(params.sessionId) ?? readNonEmptyString(params.session_id);
+    const normalizedParams = normalizeLegacyLocalAdapterSessionParams(params) ?? {};
+    const sessionId =
+      readNonEmptyString(normalizedParams.sessionId) ??
+      readNonEmptyString(normalizedParams.session_id);
     if (!sessionId) return null;
     const cwd =
-      readNonEmptyString(params.cwd) ??
-      readNonEmptyString(params.workdir) ??
-      readNonEmptyString(params.folder);
-    const workspaceId = readNonEmptyString(params.workspaceId) ?? readNonEmptyString(params.workspace_id);
-    const repoUrl = readNonEmptyString(params.repoUrl) ?? readNonEmptyString(params.repo_url);
-    const repoRef = readNonEmptyString(params.repoRef) ?? readNonEmptyString(params.repo_ref);
+      readNonEmptyString(normalizedParams.cwd) ??
+      readNonEmptyString(normalizedParams.workdir) ??
+      readNonEmptyString(normalizedParams.folder);
+    const workspaceId =
+      readNonEmptyString(normalizedParams.workspaceId) ??
+      readNonEmptyString(normalizedParams.workspace_id);
+    const repoUrl =
+      readNonEmptyString(normalizedParams.repoUrl) ??
+      readNonEmptyString(normalizedParams.repo_url);
+    const repoRef =
+      readNonEmptyString(normalizedParams.repoRef) ??
+      readNonEmptyString(normalizedParams.repo_ref);
     return {
       sessionId,
       ...(cwd ? { cwd } : {}),

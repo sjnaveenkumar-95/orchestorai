@@ -38,6 +38,39 @@ describe("adapter session codecs", () => {
     });
     expect(codexSessionCodec.getDisplayId?.(serialized ?? null)).toBe("codex-session-1");
   });
+
+  it("rewrites legacy .paperclip cwd values when ORCHESTORAI_HOME is set", () => {
+    const previousOrchestoraiHome = process.env.ORCHESTORAI_HOME;
+    process.env.ORCHESTORAI_HOME = "/Users/naveenkumar/.orchestorai";
+
+    try {
+      expect(
+        claudeSessionCodec.deserialize({
+          session_id: "claude-session-legacy",
+          folder: "/Users/naveenkumar/.paperclip/instances/default/agents/cto",
+        }),
+      ).toEqual({
+        sessionId: "claude-session-legacy",
+        cwd: "/Users/naveenkumar/.orchestorai/instances/default/agents/cto",
+      });
+
+      expect(
+        codexSessionCodec.serialize({
+          sessionId: "codex-session-legacy",
+          cwd: "/Users/naveenkumar/.paperclip/instances/default/agents/priya",
+        }),
+      ).toEqual({
+        sessionId: "codex-session-legacy",
+        cwd: "/Users/naveenkumar/.orchestorai/instances/default/agents/priya",
+      });
+    } finally {
+      if (previousOrchestoraiHome === undefined) {
+        delete process.env.ORCHESTORAI_HOME;
+      } else {
+        process.env.ORCHESTORAI_HOME = previousOrchestoraiHome;
+      }
+    }
+  });
 });
 
 describe("codex resume recovery detection", () => {

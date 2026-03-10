@@ -20,6 +20,7 @@ export { projectSlackChannels } from "./project_slack_channels.js";
 export { projectSlackMemberships } from "./project_slack_memberships.js";
 export { slackThreadLinks } from "./slack_thread_links.js";
 export { slackEventReceipts } from "./slack_event_receipts.js";
+export { slackActionRuns } from "./slack_action_runs.js";
 export { goals } from "./goals.js";
 export { issues } from "./issues.js";
 export { labels } from "./labels.js";

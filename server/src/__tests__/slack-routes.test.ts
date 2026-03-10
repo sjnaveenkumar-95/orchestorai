@@ -9,6 +9,7 @@ import type { Db } from "@orchestorai/db";
 import { slackRoutes } from "../routes/slack.js";
 
 const ORIGINAL_SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET;
+const ORIGINAL_SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 const ORIGINAL_ORCHESTORAI_HOME = process.env.ORCHESTORAI_HOME;
 const ORIGINAL_ORCHESTORAI_INSTANCE_ID = process.env.ORCHESTORAI_INSTANCE_ID;
 const ORIGINAL_ORCHESTORAI_CONFIG = process.env.ORCHESTORAI_CONFIG;
@@ -28,6 +29,9 @@ function createTestApp() {
 afterEach(() => {
   if (ORIGINAL_SLACK_SIGNING_SECRET === undefined) delete process.env.SLACK_SIGNING_SECRET;
   else process.env.SLACK_SIGNING_SECRET = ORIGINAL_SLACK_SIGNING_SECRET;
+
+  if (ORIGINAL_SLACK_BOT_TOKEN === undefined) delete process.env.SLACK_BOT_TOKEN;
+  else process.env.SLACK_BOT_TOKEN = ORIGINAL_SLACK_BOT_TOKEN;
 
   if (ORIGINAL_ORCHESTORAI_HOME === undefined) delete process.env.ORCHESTORAI_HOME;
   else process.env.ORCHESTORAI_HOME = ORIGINAL_ORCHESTORAI_HOME;
@@ -90,5 +94,26 @@ describe("slackRoutes", () => {
 
     expect(res.status).toBe(401);
     expect(res.body).toEqual({ error: "Invalid Slack signature" });
+  });
+
+  it("accepts trusted slack-bot forwarded callbacks without a Slack signature", async () => {
+    isolateOrchestorAIHome();
+    process.env.SLACK_BOT_TOKEN = "xoxb-test-forwarder-token";
+
+    const payload = {
+      type: "url_verification",
+      challenge: "forwarded-by-bot",
+    };
+    const rawBody = JSON.stringify(payload);
+
+    const res = await request(createTestApp())
+      .post("/api/slack/control/events")
+      .set("content-type", "application/json")
+      .set("authorization", `Bearer ${process.env.SLACK_BOT_TOKEN}`)
+      .set("x-orchestorai-slack-source", "slack-bot")
+      .send(rawBody);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ challenge: "forwarded-by-bot" });
   });
 });

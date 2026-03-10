@@ -1,4 +1,5 @@
 export {
+  canConnectToPostgres,
   createDb,
   ensurePostgresDatabase,
   inspectMigrations,

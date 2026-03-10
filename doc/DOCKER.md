@@ -44,6 +44,22 @@ ORCHESTORAI_PORT=3200 ORCHESTORAI_DATA_DIR=./data/pc docker compose -f docker-co
 
 If you change host port or use a non-local domain, set `ORCHESTORAI_PUBLIC_URL` to the external URL you will use in browser/auth flows.
 
+## Local Docker Stack (`npm run start`)
+
+The repo-local Docker stack started by `npm run start` now prefers your existing embedded instance DB when it already exists at `~/.orchestorai/instances/<instance-id>/db`.
+
+- Default mode: `ORCHESTORAI_DOCKER_DB_MODE=auto`
+- If the embedded instance DB exists, the container starts OrchestorAI without `DATABASE_URL`, so the mounted instance DB is reused.
+- In that embedded-instance reuse path, the start script detects the UID/GID that Docker reports for the mounted DB path and runs the app container as that user, plus injects an NSS passwd/group mapping when needed so embedded PostgreSQL can resolve the account cleanly.
+- If no embedded instance DB exists, the stack falls back to the separate Docker Postgres volume under `~/.orchestorai/docker/postgres/<instance-id>`.
+- To force the old Docker-Postgres behavior even when an embedded instance DB exists, run with `ORCHESTORAI_DOCKER_DB_MODE=docker-postgres npm run start`.
+- To force embedded-instance reuse explicitly, run with `ORCHESTORAI_DOCKER_DB_MODE=embedded npm run start`.
+
+Embedded compatibility note:
+
+- Older local embedded clusters may still use legacy `paperclip` role/database names.
+- The server now detects that legacy naming automatically and continues in compatibility mode when reusing the mounted embedded instance.
+
 ## Authenticated Compose (Single Public URL)
 
 For authenticated deployments, set one canonical public URL and let OrchestorAI derive auth/callback defaults:

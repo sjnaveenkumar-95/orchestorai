@@ -58,6 +58,15 @@ export {
   createProjectMemberSchema,
   type CreateProjectMember,
 } from "./project-member.js";
+export {
+  SLACK_CONTROL_ACTION_TYPES,
+  slackControlInterpreterMutationSchema,
+  slackControlInterpreterResultSchema,
+  slackControlMessageContextSchema,
+  type SlackControlInterpreterMutation,
+  type SlackControlInterpreterResult,
+  type SlackControlMessageContext,
+} from "./slack-control.js";
 
 export {
   createIssueSchema,

@@ -35,6 +35,7 @@ const SLACK_TYPING_MAX_DURATION_MS = 60000;
 const SLACK_TYPING_MAX_FAILURES = 2;
 const ORCHESTORAI_RUN_CACHE_TTL_MS = 15 * 60 * 1000;
 const ORCHESTORAI_LIVE_EVENT_TTL_MS = 10 * 60 * 1000;
+const BOARD_MENTION_REGEX = /(^|[^a-z0-9])(?:@board|board|local-board)(?=$|[^a-z0-9-])/i;
 
 function slugify(value) {
   return String(value || "")
@@ -75,6 +76,48 @@ function normalizeChannelType(channelType, channelId) {
     return "channel";
   }
   return "channel";
+}
+
+function toSlackEventTimestampSeconds(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, Math.floor(value));
+  }
+
+  const parsed = Number.parseFloat(String(value || "").trim());
+  if (!Number.isFinite(parsed)) {
+    return Math.floor(Date.now() / 1000);
+  }
+
+  return Math.max(0, Math.floor(parsed));
+}
+
+function buildManagedSlackControlEnvelope(event, body) {
+  const eventId = String(body?.event_id || "").trim();
+  const messageTs = String(event?.ts || "").trim();
+  const threadTs = String(event?.thread_ts || "").trim();
+  const senderId = String(event?.user || event?.bot_id || "").trim();
+
+  return {
+    type: "event_callback",
+    event_id:
+      eventId ||
+      `socket:${event?.channel || "unknown"}:${threadTs || messageTs || "none"}:${messageTs || "none"}:${senderId || "unknown"}`,
+    event_time:
+      typeof body?.event_time === "number" && Number.isFinite(body.event_time)
+        ? body.event_time
+        : toSlackEventTimestampSeconds(messageTs || event?.event_ts),
+    api_app_id: String(body?.api_app_id || "").trim() || undefined,
+    event: {
+      type: "message",
+      channel: event?.channel,
+      text: event?.text,
+      ts: event?.ts,
+      thread_ts: event?.thread_ts,
+      user: event?.user,
+      bot_id: event?.bot_id,
+      subtype: event?.subtype,
+    },
+  };
 }
 
 function buildMentionRegexes(patterns) {
@@ -121,6 +164,53 @@ function finishSentence(value) {
     return "";
   }
   return /[.!?]$/.test(normalized) ? normalized : `${normalized}.`;
+}
+
+function hasBoardMention(value) {
+  return BOARD_MENTION_REGEX.test(String(value || "").trim());
+}
+
+function readControlPayloadDetails(payload) {
+  return payload && typeof payload.details === "object" && payload.details
+    ? payload.details
+    : {};
+}
+
+function extractBoardMentionCandidates(issue, payload) {
+  const details = readControlPayloadDetails(payload);
+  return [
+    issue?.title,
+    issue?.description,
+    details?.title,
+    details?.description,
+    details?.summary,
+    details?.body,
+    details?.bodySnippet,
+    details?.comment,
+    details?.commentBody,
+  ];
+}
+
+export function shouldMirrorIssueToControlApp({ issue, payload }) {
+  if (!issue || typeof issue !== "object") {
+    return false;
+  }
+
+  const createdByUserId = String(issue.createdByUserId || "").trim();
+  if (!createdByUserId) {
+    return true;
+  }
+
+  if (String(issue.assigneeUserId || "").trim()) {
+    return true;
+  }
+
+  const details = readControlPayloadDetails(payload);
+  if (String(details.assigneeUserId || "").trim()) {
+    return true;
+  }
+
+  return extractBoardMentionCandidates(issue, payload).some(hasBoardMention);
 }
 
 function extractIssueBrief(description) {
@@ -592,6 +682,58 @@ export class SlackRuntime {
     return Boolean(this.orchestoraiClient && this.orchestoraiThreadStore && this.config.orchestorai.enabled);
   }
 
+  async getManagedOrchestorAIProjectChannel(channelId) {
+    if (!this.isOrchestorAIEnabled() || !channelId) {
+      return null;
+    }
+
+    try {
+      return await this.orchestoraiClient.getManagedProjectChannel(channelId);
+    } catch (err) {
+      this.log("debug", `managed project lookup skipped for ${channelId}: ${String(err)}`);
+      return null;
+    }
+  }
+
+  async maybeForwardManagedProjectChannelEvent({ event, body, channelType }) {
+    if (channelType !== "channel" && channelType !== "group") {
+      return false;
+    }
+
+    const managedProject = await this.getManagedOrchestorAIProjectChannel(event.channel);
+    if (!managedProject) {
+      return false;
+    }
+
+    if (this.markSeen(event.channel, event.ts)) {
+      this.log("debug", `drop: duplicate managed-channel event ${event.channel}:${event.ts}`);
+      return true;
+    }
+
+    try {
+      await this.orchestoraiClient.forwardSlackControlEvent(
+        buildManagedSlackControlEnvelope(event, body),
+        {
+          botToken: this.config.slack.botToken,
+        },
+      );
+      this.log(
+        "debug",
+        `forwarded managed-channel message to OrchestorAI control channel=${event.channel} project=${managedProject.name || managedProject.id || "unknown"} thread=${event.thread_ts || event.ts || "none"}`,
+      );
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      this.log("error", `managed-channel forward failed: ${reason}`);
+      await this.postOrchestorAIThreadReply(
+        event.channel,
+        event.thread_ts || event.ts,
+        `OrchestorAI managed-channel handoff failed: ${reason}`,
+      );
+    }
+
+    return true;
+  }
+
   isDirectBotMention(event, options) {
     if (options?.forcedMention) {
       return true;
@@ -933,6 +1075,11 @@ export class SlackRuntime {
       if (!issue?.id) {
         return null;
       }
+      const assigneeName =
+        issue.assigneeAgentId && this.orchestoraiClient
+          ? await this.orchestoraiClient.getAgentName(issue.assigneeAgentId)
+          : "";
+      const projectName = String(issue.project?.name || "").trim();
 
       if (!issue.parentId) {
         const fallbackChannelId = String(options.fallbackChannelId || "").trim();
@@ -940,11 +1087,6 @@ export class SlackRuntime {
           return null;
         }
 
-        const assigneeName =
-          issue.assigneeAgentId && this.orchestoraiClient
-            ? await this.orchestoraiClient.getAgentName(issue.assigneeAgentId)
-            : "";
-        const projectName = String(issue.project?.name || "").trim();
         const issueIdentifier = String(issue.identifier || issue.id).trim();
         const threadTs = await this.postOrchestorAIRootMessage(
           fallbackChannelId,
@@ -984,16 +1126,59 @@ export class SlackRuntime {
         this.orchestoraiThreadStore.getMappingByIssueId(issue.parentId) ||
         (await this.ensureOrchestorAIThreadMappingForIssue(issue.parentId, options, visited));
       if (!parentMapping) {
-        return null;
+        const fallbackChannelId = String(options.fallbackChannelId || "").trim();
+        if (!options.allowTopLevelRoot || !fallbackChannelId) {
+          return null;
+        }
+
+        let parentIdentifier = "";
+        if (issue.parentId && this.orchestoraiClient) {
+          try {
+            const parentIssue = await this.orchestoraiClient.getIssue(issue.parentId);
+            parentIdentifier = String(parentIssue?.identifier || "").trim();
+          } catch {
+            parentIdentifier = "";
+          }
+        }
+
+        const threadTs = await this.postOrchestorAIRootMessage(
+          fallbackChannelId,
+          formatChildIssueThreadRootMessage({
+            childIdentifier: String(issue.identifier || issue.id).trim(),
+            parentIdentifier,
+            title: issue.title,
+            assigneeName,
+            projectName,
+          }),
+        );
+
+        const mapping = this.orchestoraiThreadStore.putMapping({
+          channelId: fallbackChannelId,
+          threadTs,
+          companyId: issue.companyId || this.config.orchestorai.companyId,
+          issueId: issue.id,
+          issueIdentifier: issue.identifier,
+          issueTitle: issue.title,
+          assigneeAgentId: issue.assigneeAgentId,
+          assigneeName,
+          projectId: issue.projectId || null,
+          projectName,
+          parentIssueId: issue.parentId,
+          parentIssueIdentifier: parentIdentifier,
+          rootIssueId: issue.id,
+          rootIssueIdentifier: issue.identifier,
+          sourceMessageTs: threadTs,
+        });
+
+        this.log(
+          "info",
+          `orchestorai child issue fallback thread created issue=${issue.id} thread=${fallbackChannelId}:${threadTs} parent=${issue.parentId}`,
+        );
+        return mapping;
       }
 
-      const assigneeName =
-        issue.assigneeAgentId && this.orchestoraiClient
-          ? await this.orchestoraiClient.getAgentName(issue.assigneeAgentId)
-          : "";
       const childIdentifier = String(issue.identifier || issue.id).trim();
       const parentIdentifier = String(parentMapping.issueIdentifier || "").trim();
-      const projectName = String(issue.project?.name || parentMapping.projectName || "").trim();
 
       const threadTs = await this.postOrchestorAIRootMessage(
         parentMapping.channelId,
@@ -1096,13 +1281,21 @@ export class SlackRuntime {
       }
 
       if (payload.action === "issue.created") {
+        const issue = await this.orchestoraiClient.getIssue(payload.entityId);
+        const allowTopLevelRoot =
+          payload.actorType === "user" && shouldMirrorIssueToControlApp({ issue, payload });
+        if (!allowTopLevelRoot) {
+          return;
+        }
         if (payload.runId) {
           this.rememberOrchestorAIRunIssues(payload.runId, [{ issueId: payload.entityId }]);
         }
-        const fallbackChannelId = this.orchestoraiThreadStore.getPreferredChannel(this.config.orchestorai.companyId);
+        const fallbackChannelId = this.orchestoraiThreadStore.getPreferredChannel(
+          issue?.companyId || this.config.orchestorai.companyId,
+        );
         await this.ensureOrchestorAIThreadMappingForIssue(payload.entityId, {
           notifyParentThread: true,
-          allowTopLevelRoot: payload.actorType === "user",
+          allowTopLevelRoot,
           fallbackChannelId,
         });
         return;
@@ -1112,9 +1305,22 @@ export class SlackRuntime {
         return;
       }
 
-      const mapping =
+      let mapping =
         this.orchestoraiThreadStore.getMappingByIssueId(payload.entityId) ||
         (await this.ensureOrchestorAIThreadMappingForIssue(payload.entityId));
+      if (!mapping) {
+        const issue = await this.orchestoraiClient.getIssue(payload.entityId);
+        if (!issue?.createdByUserId || !shouldMirrorIssueToControlApp({ issue, payload })) {
+          return;
+        }
+        const fallbackChannelId = this.orchestoraiThreadStore.getPreferredChannel(
+          issue.companyId || this.config.orchestorai.companyId,
+        );
+        mapping = await this.ensureOrchestorAIThreadMappingForIssue(payload.entityId, {
+          allowTopLevelRoot: true,
+          fallbackChannelId,
+        });
+      }
       if (!mapping) {
         return;
       }
@@ -2455,7 +2661,22 @@ export class SlackRuntime {
       if (this.shouldDropMismatchedEvent(body)) {
         return;
       }
-      this.enqueueDebounced(event, opts);
+      const normalized = await this.normalizeInboundMessageEvent(event);
+      if (!normalized) {
+        return;
+      }
+
+      const channelType = normalizeChannelType(normalized.channel_type, normalized.channel);
+      const handledByManagedChannelForwarder = await this.maybeForwardManagedProjectChannelEvent({
+        event: normalized,
+        body,
+        channelType,
+      });
+      if (handledByManagedChannelForwarder) {
+        return;
+      }
+
+      this.enqueueDebounced(normalized, opts);
     };
 
     this.app.event("message", async (args) => {
@@ -2463,6 +2684,15 @@ export class SlackRuntime {
     });
     this.app.event("app_mention", async ({ event, body }) => {
       if (this.shouldDropMismatchedEvent(body)) {
+        return;
+      }
+      const channelType = normalizeChannelType(event.channel_type, event.channel);
+      const handledByManagedChannelForwarder = await this.maybeForwardManagedProjectChannelEvent({
+        event,
+        body,
+        channelType,
+      });
+      if (handledByManagedChannelForwarder) {
         return;
       }
       await this.handleCodexMessage(event, { forcedMention: true });

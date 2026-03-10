@@ -14,6 +14,8 @@ import {
   ensureAbsoluteDirectory,
   ensureCommandResolvable,
   ensurePathInEnv,
+  normalizeLegacyLocalAdapterConfig,
+  normalizeLegacyLocalAdapterSessionParams,
   renderTemplate,
   runChildProcess,
 } from "@orchestorai/adapter-utils/server-utils";
@@ -202,7 +204,9 @@ function renderOrchestorAIHeartbeatBrief(params: {
 }
 
 export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
-  const { runId, agent, runtime, config, context, onLog, onMeta, authToken } = ctx;
+  const { runId, agent, runtime, context, onLog, onMeta, authToken } = ctx;
+  const config = normalizeLegacyLocalAdapterConfig(ctx.config);
+  const injectHeartbeatBrief = asBoolean(config.injectHeartbeatBrief, true);
 
   const promptTemplate = asString(
     config.promptTemplate,
@@ -330,7 +334,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     return asStringArray(config.args);
   })();
 
-  const runtimeSessionParams = parseObject(runtime.sessionParams);
+  const runtimeSessionParams =
+    normalizeLegacyLocalAdapterSessionParams(parseObject(runtime.sessionParams)) ?? {};
   const runtimeSessionId = asString(runtimeSessionParams.sessionId, runtime.sessionId ?? "");
   const runtimeSessionCwd = asString(runtimeSessionParams.cwd, "");
   const canResumeSession =
@@ -367,34 +372,40 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     if (!instructionsFilePath) return [] as string[];
     if (instructionsPrefix.length > 0) {
       return [
-        "Prepended mandatory OrchestorAI heartbeat brief to stdin prompt.",
+        injectHeartbeatBrief
+          ? "Prepended mandatory OrchestorAI heartbeat brief to stdin prompt."
+          : "Skipped OrchestorAI heartbeat brief injection for this run.",
         `Loaded agent instructions from ${instructionsFilePath}`,
         `Prepended instructions + path directive to stdin prompt (relative references from ${instructionsDir}).`,
         ...(inferredAgentHome ? [`Exported AGENT_HOME and ORCHESTORAI_AGENT_HOME=${inferredAgentHome} from instructions file context.`] : []),
       ];
     }
     return [
-      "Prepended mandatory OrchestorAI heartbeat brief to stdin prompt.",
+      injectHeartbeatBrief
+        ? "Prepended mandatory OrchestorAI heartbeat brief to stdin prompt."
+        : "Skipped OrchestorAI heartbeat brief injection for this run.",
       `Configured instructionsFilePath ${instructionsFilePath}, but file could not be read; continuing without injected instructions.`,
       ...(inferredAgentHome ? [`Exported AGENT_HOME and ORCHESTORAI_AGENT_HOME=${inferredAgentHome} from instructions file context.`] : []),
     ];
   })();
-  const heartbeatPrefix = renderOrchestorAIHeartbeatBrief({
-    env,
-    runId,
-    agentHome: inferredAgentHome,
-    wakeTaskId,
-    wakeReason,
-    wakeCommentId,
-    approvalId,
-    approvalStatus,
-    linkedIssueIds,
-    workspaceCwd: effectiveWorkspaceCwd,
-    workspaceSource,
-    workspaceId,
-    workspaceRepoUrl,
-    workspaceRepoRef,
-  });
+  const heartbeatPrefix = injectHeartbeatBrief
+    ? renderOrchestorAIHeartbeatBrief({
+        env,
+        runId,
+        agentHome: inferredAgentHome,
+        wakeTaskId,
+        wakeReason,
+        wakeCommentId,
+        approvalId,
+        approvalStatus,
+        linkedIssueIds,
+        workspaceCwd: effectiveWorkspaceCwd,
+        workspaceSource,
+        workspaceId,
+        workspaceRepoUrl,
+        workspaceRepoRef,
+      })
+    : "";
   const renderedPrompt = renderTemplate(promptTemplate, {
     agentId: agent.id,
     companyId: agent.companyId,

@@ -11,6 +11,7 @@ const fs = require("node:fs");
 const capturePath = process.env.ORCHESTORAI_TEST_CAPTURE_PATH;
 const payload = {
   argv: process.argv.slice(2),
+  cwd: process.cwd(),
   prompt: fs.readFileSync(0, "utf8"),
   env: {
     AGENT_HOME: process.env.AGENT_HOME || "",
@@ -54,6 +55,7 @@ async function writeAgentHome(agentHome: string, agentName: string): Promise<str
 
 type CapturePayload = {
   argv: string[];
+  cwd: string;
   prompt: string;
   env: Record<string, string>;
 };
@@ -241,6 +243,161 @@ describe("codex_local execute", () => {
         delete process.env.AGENT_HOME;
       } else {
         process.env.AGENT_HOME = previousAgentHome;
+      }
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("can skip heartbeat brief injection for analysis-only runs", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "orchestorai-codex-no-heartbeat-"));
+    const workspace = path.join(root, "workspace");
+    const commandPath = path.join(root, "codex");
+    const capturePath = path.join(root, "capture.json");
+    await fs.mkdir(workspace, { recursive: true });
+    await writeFakeCodexCommand(commandPath);
+
+    try {
+      const result = await execute({
+        runId: "run-3",
+        agent: {
+          id: "agent-3",
+          companyId: "company-1",
+          name: "Slack Interpreter",
+          adapterType: "codex_local",
+          adapterConfig: {},
+        },
+        runtime: {
+          sessionId: null,
+          sessionParams: null,
+          sessionDisplayId: null,
+          taskKey: null,
+        },
+        config: {
+          command: commandPath,
+          cwd: workspace,
+          injectHeartbeatBrief: false,
+          env: {
+            ORCHESTORAI_TEST_CAPTURE_PATH: capturePath,
+          },
+          promptTemplate: "Return JSON only.",
+        },
+        context: {
+          wakeReason: "slack_interpreter",
+        },
+        authToken: "run-jwt-token",
+        onLog: async () => {},
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.errorMessage).toBeNull();
+
+      const capture = JSON.parse(await fs.readFile(capturePath, "utf8")) as CapturePayload;
+      expect(capture.prompt).toBe("Return JSON only.");
+      expect(capture.prompt).not.toContain("OrchestorAI heartbeat directive:");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rewrites legacy .paperclip adapter paths to the current .orchestorai home", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "orchestorai-codex-legacy-home-"));
+    const orchestoraiHome = path.join(root, ".orchestorai");
+    const legacyHome = path.join(root, ".paperclip");
+    const workspace = path.join(orchestoraiHome, "instances", "default", "agents", "priya-workspace");
+    const agentHome = path.join(
+      orchestoraiHome,
+      "instances",
+      "default",
+      "agents",
+      "priya-qa-automation-engineer",
+    );
+    const legacyWorkspace = path.join(legacyHome, "instances", "default", "agents", "priya-workspace");
+    const legacyAgentHome = path.join(
+      legacyHome,
+      "instances",
+      "default",
+      "agents",
+      "priya-qa-automation-engineer",
+    );
+    const commandPath = path.join(root, "codex");
+    const capturePath = path.join(root, "capture.json");
+    await writeFakeCodexCommand(commandPath);
+    const rewrittenInstructionsFilePath = await writeAgentHome(
+      agentHome,
+      "Priya (QA Automation Engineer)",
+    );
+
+    const previousHome = process.env.HOME;
+    const previousCodexHome = process.env.CODEX_HOME;
+    const previousOrchestoraiHome = process.env.ORCHESTORAI_HOME;
+    process.env.HOME = orchestoraiHome;
+    process.env.CODEX_HOME = path.join(root, ".codex");
+    process.env.ORCHESTORAI_HOME = orchestoraiHome;
+
+    try {
+      const result = await execute({
+        runId: "run-legacy",
+        agent: {
+          id: "agent-legacy",
+          companyId: "company-1",
+          name: "Priya (QA Automation Engineer)",
+          adapterType: "codex_local",
+          adapterConfig: {},
+        },
+        runtime: {
+          sessionId: "codex-session-legacy",
+          sessionParams: {
+            sessionId: "codex-session-legacy",
+            cwd: legacyWorkspace,
+          },
+          sessionDisplayId: "codex-session-legacy",
+          taskKey: null,
+        },
+        config: {
+          command: commandPath,
+          cwd: legacyWorkspace,
+          instructionsFilePath: path.join(legacyAgentHome, "AGENTS.md"),
+          env: {
+            AGENT_HOME: legacyAgentHome,
+            ORCHESTORAI_TEST_CAPTURE_PATH: capturePath,
+          },
+          promptTemplate: "Continue the OrchestorAI heartbeat.",
+        },
+        context: {
+          wakeReason: "heartbeat_timer",
+        },
+        authToken: "run-jwt-token",
+        onLog: async () => {},
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.errorMessage).toBeNull();
+
+      const capture = JSON.parse(await fs.readFile(capturePath, "utf8")) as CapturePayload;
+      expect(await fs.realpath(capture.cwd)).toBe(await fs.realpath(workspace));
+      expect(capture.env.AGENT_HOME).toBe(agentHome);
+      expect(capture.env.ORCHESTORAI_AGENT_HOME).toBe(agentHome);
+      expect(capture.prompt).toContain(`Effective agent home: ${agentHome}`);
+      expect(capture.prompt).toContain(
+        `The above agent instructions were loaded from ${rewrittenInstructionsFilePath}.`,
+      );
+      expect((await fs.stat(workspace)).isDirectory()).toBe(true);
+      await expect(fs.stat(legacyHome)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      if (previousCodexHome === undefined) {
+        delete process.env.CODEX_HOME;
+      } else {
+        process.env.CODEX_HOME = previousCodexHome;
+      }
+      if (previousOrchestoraiHome === undefined) {
+        delete process.env.ORCHESTORAI_HOME;
+      } else {
+        process.env.ORCHESTORAI_HOME = previousOrchestoraiHome;
       }
       await fs.rm(root, { recursive: true, force: true });
     }

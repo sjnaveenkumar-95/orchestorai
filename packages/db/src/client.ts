@@ -733,4 +733,16 @@ export async function ensurePostgresDatabase(
   }
 }
 
+export async function canConnectToPostgres(url: string): Promise<boolean> {
+  const sql = postgres(url, { max: 1 });
+  try {
+    await sql`select 1`;
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await sql.end({ timeout: 0 }).catch(() => undefined);
+  }
+}
+
 export type Db = ReturnType<typeof createDb>;

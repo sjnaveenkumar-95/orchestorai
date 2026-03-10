@@ -5,6 +5,7 @@ import {
   buildOrchestorAILatestCommentSummary,
   buildOrchestorAIIssueSummary,
   buildOrchestorAIOverviewSummary,
+  shouldMirrorIssueToControlApp,
 } from "../src/slack-runtime.js";
 
 test("buildOrchestorAIIssueSummary renders a concise ticket summary", () => {
@@ -82,4 +83,60 @@ test("buildOrchestorAILatestCommentSummary handles tickets with no comments", ()
   });
 
   assert.equal(summary, "*Summary*\n- AND-15 has no comments yet.");
+});
+
+test("shouldMirrorIssueToControlApp suppresses board-created issues that are not board-targeted", () => {
+  const shouldMirror = shouldMirrorIssueToControlApp({
+    issue: {
+      identifier: "AND-20",
+      title: "Create architecture doc",
+      description: "Produce a detailed architecture document.",
+      createdByUserId: "local-board",
+      assigneeUserId: null,
+    },
+    payload: {
+      actorType: "user",
+      details: {},
+    },
+  });
+
+  assert.equal(shouldMirror, false);
+});
+
+test("shouldMirrorIssueToControlApp allows board-created issues assigned to board users", () => {
+  const shouldMirror = shouldMirrorIssueToControlApp({
+    issue: {
+      identifier: "AND-21",
+      title: "Review delivery plan",
+      description: "",
+      createdByUserId: "local-board",
+      assigneeUserId: "local-board",
+    },
+    payload: {
+      actorType: "user",
+      details: {},
+    },
+  });
+
+  assert.equal(shouldMirror, true);
+});
+
+test("shouldMirrorIssueToControlApp allows board-created issues when a later comment mentions board", () => {
+  const shouldMirror = shouldMirrorIssueToControlApp({
+    issue: {
+      identifier: "AND-22",
+      title: "Create implementation subtasks",
+      description: "",
+      createdByUserId: "local-board",
+      assigneeUserId: null,
+    },
+    payload: {
+      actorType: "agent",
+      details: {
+        bodySnippet: "Board please review the proposed subtasks before we proceed.",
+      },
+    },
+  });
+
+  assert.equal(shouldMirror, true);
 });
