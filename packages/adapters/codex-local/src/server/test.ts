@@ -11,6 +11,7 @@ import {
   ensureAbsoluteDirectory,
   ensureCommandResolvable,
   ensurePathInEnv,
+  normalizeLegacyLocalAdapterConfig,
   runChildProcess,
 } from "@orchestorai/adapter-utils/server-utils";
 import path from "node:path";
@@ -55,7 +56,7 @@ export async function testEnvironment(
   ctx: AdapterEnvironmentTestContext,
 ): Promise<AdapterEnvironmentTestResult> {
   const checks: AdapterEnvironmentCheck[] = [];
-  const config = parseObject(ctx.config);
+  const config = normalizeLegacyLocalAdapterConfig(parseObject(ctx.config));
   const command = asString(config.command, "codex");
   const cwd = asString(config.cwd, process.cwd());
 

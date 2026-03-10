@@ -7,6 +7,7 @@ import { stdin, stdout } from "node:process";
 import type { Request as ExpressRequest, RequestHandler } from "express";
 import { and, eq } from "drizzle-orm";
 import {
+  canConnectToPostgres,
   createDb,
   ensurePostgresDatabase,
   inspectMigrations,
@@ -52,9 +53,51 @@ type EmbeddedPostgresCtor = new (opts: {
   password: string;
   port: number;
   persistent: boolean;
+  createPostgresUser?: boolean;
   onLog?: (message: unknown) => void;
   onError?: (message: unknown) => void;
 }) => EmbeddedPostgresInstance;
+
+type EmbeddedDatabaseCandidate = {
+  user: string;
+  password: string;
+  databaseName: string;
+  legacy: boolean;
+};
+
+function buildEmbeddedPostgresUrl(opts: {
+  user: string;
+  password: string;
+  port: number;
+  database: string;
+}): string {
+  const encodedUser = encodeURIComponent(opts.user);
+  const encodedPassword = encodeURIComponent(opts.password);
+  return `postgres://${encodedUser}:${encodedPassword}@127.0.0.1:${opts.port}/${opts.database}`;
+}
+
+async function resolveEmbeddedDatabaseCandidate(port: number): Promise<EmbeddedDatabaseCandidate> {
+  const candidates: EmbeddedDatabaseCandidate[] = [
+    { user: "orchestorai", password: "orchestorai", databaseName: "orchestorai", legacy: false },
+    { user: "paperclip", password: "paperclip", databaseName: "paperclip", legacy: true },
+  ];
+
+  for (const candidate of candidates) {
+    const adminUrl = buildEmbeddedPostgresUrl({
+      user: candidate.user,
+      password: candidate.password,
+      port,
+      database: "postgres",
+    });
+    if (await canConnectToPostgres(adminUrl)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    "Embedded PostgreSQL cluster is present but neither the current orchestorai nor legacy paperclip credentials worked.",
+  );
+}
 
 const config = loadConfig();
 if (process.env.ORCHESTORAI_SECRETS_PROVIDER === undefined) {
@@ -323,6 +366,7 @@ if (config.databaseUrl) {
       password: "orchestorai",
       port,
       persistent: true,
+      createPostgresUser: typeof process.getuid === "function" && process.getuid() === 0,
       onLog: appendEmbeddedPostgresLog,
       onError: appendEmbeddedPostgresLog,
     });
@@ -351,13 +395,33 @@ if (config.databaseUrl) {
     embeddedPostgresStartedByThisProcess = true;
   }
 
-  const embeddedAdminConnectionString = `postgres://orchestorai:orchestorai@127.0.0.1:${port}/postgres`;
-  const dbStatus = await ensurePostgresDatabase(embeddedAdminConnectionString, "orchestorai");
-  if (dbStatus === "created") {
-    logger.info("Created embedded PostgreSQL database: orchestorai");
+  const embeddedDbCandidate = await resolveEmbeddedDatabaseCandidate(port);
+  if (embeddedDbCandidate.legacy) {
+    logger.warn(
+      "Embedded PostgreSQL cluster uses legacy paperclip credentials/database names; continuing in compatibility mode.",
+    );
   }
 
-  const embeddedConnectionString = `postgres://orchestorai:orchestorai@127.0.0.1:${port}/orchestorai`;
+  const embeddedAdminConnectionString = buildEmbeddedPostgresUrl({
+    user: embeddedDbCandidate.user,
+    password: embeddedDbCandidate.password,
+    port,
+    database: "postgres",
+  });
+  const dbStatus = await ensurePostgresDatabase(
+    embeddedAdminConnectionString,
+    embeddedDbCandidate.databaseName,
+  );
+  if (dbStatus === "created") {
+    logger.info(`Created embedded PostgreSQL database: ${embeddedDbCandidate.databaseName}`);
+  }
+
+  const embeddedConnectionString = buildEmbeddedPostgresUrl({
+    user: embeddedDbCandidate.user,
+    password: embeddedDbCandidate.password,
+    port,
+    database: embeddedDbCandidate.databaseName,
+  });
   const shouldAutoApplyFirstRunMigrations = !clusterAlreadyInitialized || dbStatus === "created";
   if (shouldAutoApplyFirstRunMigrations) {
     logger.info("Detected first-run embedded PostgreSQL setup; applying pending migrations automatically");

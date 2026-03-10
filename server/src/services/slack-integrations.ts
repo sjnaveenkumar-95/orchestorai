@@ -11,6 +11,7 @@ import {
   projectSlackChannels,
   projectSlackMemberships,
   projects,
+  slackActionRuns,
   slackEventReceipts,
   slackThreadLinks,
 } from "@orchestorai/db";
@@ -20,18 +21,34 @@ import type {
   ProjectSlackChannel,
   ProjectSlackMembership,
   ProjectSlackState,
+  SlackControlInterpreterResult,
+  SlackControlMessageContext,
   SlackThreadLink,
 } from "@orchestorai/shared";
-import { buildProjectSlackChannelName } from "@orchestorai/shared";
+import {
+  buildProjectSlackChannelName,
+  normalizeReferenceAlias,
+  readReferenceAliases,
+} from "@orchestorai/shared";
 import { createInstanceSettingsService } from "./instance-settings.js";
 import { logger } from "../middleware/logger.js";
 import { secretService } from "./secrets.js";
 import { loadConfig } from "../config.js";
 import { notFound, unprocessable } from "../errors.js";
+import { agentService } from "./agents.js";
 import { heartbeatService } from "./heartbeat.js";
+import { issueCommandService } from "./issue-commands.js";
 import { issueService } from "./issues.js";
 import { logActivity } from "./activity-log.js";
 import { subscribeAllLiveEvents } from "./live-events.js";
+import { projectService } from "./projects.js";
+import {
+  type SlackActionInterpreterInput,
+  type SlackInterpreterCandidateAgent,
+  type SlackInterpreterCandidateIssue,
+  type SlackInterpreterCandidateProject,
+  slackActionInterpreterService,
+} from "./slack-action-interpreter.js";
 
 type ActorRef = {
   userId?: string | null;
@@ -70,10 +87,29 @@ type SlackIssue = {
   assigneeUserId: string | null;
 };
 
+type SlackActionRunStatus =
+  | "received"
+  | "clarification"
+  | "executed"
+  | "ignored"
+  | "failed";
+
+type SlackActionExecutionOutcome = {
+  status: SlackActionRunStatus;
+  slackReply: string | null;
+  issue: SlackIssue | null;
+  canonicalLink: SlackThreadLink | null;
+  executionResult: Record<string, unknown> | null;
+};
+
 const liveEventForwarderDbs = new WeakSet<object>();
 const issueThreadLinkInFlight = new Map<string, Promise<SlackThreadLink | null>>();
 const projectChannelEnsureInFlight = new Map<string, Promise<ProjectSlackChannel | null>>();
 const SLACK_FORWARDER_STATE_KEY = "__orchestoraiSlackForwarderState";
+const SLACK_SYSTEM_ACTOR_ID = "slack_control";
+const SLACK_AUTO_APPLY_CONFIDENCE = 0.7;
+const SLACK_API_TIMEOUT_MS = 15000;
+const SLACK_THREAD_STATUS_REFRESH_MS = 4000;
 
 type SlackForwarderState = {
   db: object | null;
@@ -94,6 +130,19 @@ class SlackApiError extends Error {
 class SlackWebClient {
   constructor(private readonly token: string) {}
 
+  private async fetchWithTimeout(input: string | URL, init: RequestInit) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), SLACK_API_TIMEOUT_MS);
+    try {
+      return await fetch(input, {
+        ...init,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   private async callQuery<T extends { ok: boolean; error?: string }>(
     method: string,
     query: Record<string, string>,
@@ -103,7 +152,7 @@ class SlackWebClient {
       url.searchParams.set(key, value);
     }
 
-    const response = await fetch(url, {
+    const response = await this.fetchWithTimeout(url, {
       headers: {
         authorization: `Bearer ${this.token}`,
       },
@@ -123,7 +172,7 @@ class SlackWebClient {
     method: string,
     payload: Record<string, unknown>,
   ): Promise<T> {
-    const response = await fetch(`https://slack.com/api/${method}`, {
+    const response = await this.fetchWithTimeout(`https://slack.com/api/${method}`, {
       method: "POST",
       headers: {
         authorization: `Bearer ${this.token}`,
@@ -235,6 +284,64 @@ class SlackWebClient {
       threadTs: json.message?.thread_ts ?? input.threadTs ?? json.ts,
     };
   }
+
+  async listThreadReplies(input: { channel: string; threadTs: string; limit?: number }) {
+    return this.callQuery<{
+      ok: boolean;
+      error?: string;
+      messages?: Array<{
+        user?: string;
+        text?: string;
+        ts?: string;
+        bot_id?: string;
+        subtype?: string;
+      }>;
+    }>("conversations.replies", {
+      channel: input.channel,
+      ts: input.threadTs,
+      limit: String(input.limit ?? 20),
+      inclusive: "true",
+    });
+  }
+
+  async getPermalink(input: { channel: string; messageTs: string }) {
+    return this.callQuery<{
+      ok: boolean;
+      error?: string;
+      permalink?: string;
+    }>("chat.getPermalink", {
+      channel: input.channel,
+      message_ts: input.messageTs,
+    });
+  }
+
+  async getUserInfo(input: { userId: string }) {
+    return this.callQuery<{
+      ok: boolean;
+      error?: string;
+      user?: {
+        name?: string;
+        real_name?: string;
+        real_name_normalized?: string;
+        profile?: {
+          display_name?: string;
+          display_name_normalized?: string;
+          real_name?: string;
+          real_name_normalized?: string;
+        };
+      };
+    }>("users.info", {
+      user: input.userId,
+    });
+  }
+
+  async setThreadStatus(input: { channelId: string; threadTs: string; status: string }) {
+    await this.callJson("assistant.threads.setStatus", {
+      channel_id: input.channelId,
+      thread_ts: input.threadTs,
+      status: input.status,
+    });
+  }
 }
 
 function truncate(value: string, maxLength: number): string {
@@ -279,6 +386,104 @@ function stripLeadingSlackMentions(text: string) {
   return text.replace(/^(?:<@[A-Z0-9]+>\s*)+/gi, "").trim();
 }
 
+function collapseWhitespace(value: string) {
+  return value
+    .replace(/\r/g, "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function extractSlackMentionIds(text: string) {
+  return Array.from(
+    new Set(
+      Array.from(text.matchAll(/<@([A-Z0-9]+)>/gi))
+        .map((match) => match[1]?.trim().toUpperCase() ?? "")
+        .filter(Boolean),
+    ),
+  );
+}
+
+function extractPlainAgentMentions(text: string) {
+  return Array.from(
+    new Set(
+      Array.from(text.matchAll(/\B@([^\s@,!?.:;()[\]{}<>]+)/g))
+        .map((match) => match[1]?.trim() ?? "")
+        .filter(Boolean),
+    ),
+  );
+}
+
+function normalizeLookupKey(value: string | null | undefined) {
+  return normalizeReferenceAlias(value) ?? null;
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.filter((value): value is string => Boolean(value))));
+}
+
+function parseSlackLookupMappings(value: string | null | undefined) {
+  const raw = readNonEmptyString(value);
+  if (!raw) return new Map<string, string>();
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return new Map<string, string>();
+    }
+    return new Map(
+      Object.entries(parsed as Record<string, unknown>)
+        .map(([key, entry]) => {
+          const normalizedKey = normalizeLookupKey(key);
+          const normalizedValue = readNonEmptyString(String(entry ?? ""));
+          return normalizedKey && normalizedValue ? [normalizedKey, normalizedValue] as const : null;
+        })
+        .filter((entry): entry is readonly [string, string] => Boolean(entry)),
+    );
+  } catch {
+    return new Map<string, string>();
+  }
+}
+
+function isSameSlackThread(
+  left: Pick<SlackThreadLink, "channelId" | "threadTs"> | null | undefined,
+  right: { channelId: string; threadTs: string },
+) {
+  if (!left) return false;
+  return left.channelId === right.channelId && left.threadTs === right.threadTs;
+}
+
+function buildSlackThreadPointer(link: SlackThreadLink) {
+  return `channel ${link.channelId}, thread ${link.threadTs}`;
+}
+
+function formatReadableAgentLabel(input: { name: string; title?: string | null; role?: string | null }) {
+  const baseName = input.name.trim();
+  const title = readNonEmptyString(input.title);
+  if (title && title !== baseName) {
+    return `${baseName} (${title})`;
+  }
+  const role = readNonEmptyString(input.role);
+  if (role && role !== baseName) {
+    return `${baseName} (${role})`;
+  }
+  return baseName || "Slack user";
+}
+
+function toSlackIssue(issue: SlackIssue | null | undefined): SlackIssue | null {
+  if (!issue) return null;
+  return {
+    id: issue.id,
+    companyId: issue.companyId,
+    projectId: issue.projectId ?? null,
+    identifier: issue.identifier ?? null,
+    title: issue.title,
+    status: issue.status,
+    priority: issue.priority,
+    assigneeAgentId: issue.assigneeAgentId ?? null,
+    assigneeUserId: issue.assigneeUserId ?? null,
+  };
+}
+
 function parseSlackMemberIds(value: string | null | undefined) {
   if (!value) return [];
   return Array.from(
@@ -304,37 +509,6 @@ function toSlackThreadLink(row: typeof slackThreadLinks.$inferSelect): SlackThre
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
-}
-
-function buildSlackOriginDescription(input: {
-  text: string;
-  slackUserId?: string | null;
-  channelId: string;
-  threadTs: string;
-}) {
-  return [
-    "_Created from Slack_",
-    `Slack user: ${input.slackUserId ? `<@${input.slackUserId}>` : "unknown-user"}`,
-    `Slack channel: ${input.channelId}`,
-    `Slack thread: ${input.threadTs}`,
-    "",
-    input.text.trim(),
-  ].join("\n");
-}
-
-function buildSlackCommentBody(input: {
-  text: string;
-  slackUserId?: string | null;
-  channelId: string;
-  threadTs: string;
-}) {
-  return [
-    `Slack reply from ${input.slackUserId ? `<@${input.slackUserId}>` : "unknown-user"}`,
-    `Channel: ${input.channelId}`,
-    `Thread: ${input.threadTs}`,
-    "",
-    input.text.trim(),
-  ].join("\n");
 }
 
 type SlackChannelLookup = {
@@ -530,8 +704,15 @@ async function slackOAuthExchange(input: {
 export function slackIntegrationService(db: Db) {
   const secretsSvc = secretService(db);
   const instanceSettings = createInstanceSettingsService();
+  const agentsSvc = agentService(db);
   const heartbeat = heartbeatService(db);
+  const issueCommands = issueCommandService(db);
+  const interpreter = slackActionInterpreterService({ instanceSettings });
   const issuesSvc = issueService(db);
+  const projectsSvc = projectService(db);
+  const slackUserLabelCache = new Map<string, Promise<string>>();
+  const slackChannelLabelCache = new Map<string, Promise<string>>();
+  const slackThreadPermalinkCache = new Map<string, Promise<string | null>>();
 
   async function getAgentRow(agentId: string) {
     return db
@@ -651,6 +832,1227 @@ export function slackIntegrationService(db: Db) {
   async function getControlClient() {
     const controlBotToken = instanceSettings.getRuntimeSecretValue("slackBotToken");
     return controlBotToken ? new SlackWebClient(controlBotToken) : null;
+  }
+
+  function createControlThreadStatusController(input: {
+    channelId: string;
+    threadTs: string;
+  }) {
+    let stopped = false;
+    let currentStatus = "";
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    let clientPromise: Promise<SlackWebClient | null> | null = null;
+
+    const getClient = async () => {
+      clientPromise ??= getControlClient();
+      return clientPromise;
+    };
+
+    const clearRefresh = () => {
+      if (!intervalId) return;
+      clearInterval(intervalId);
+      intervalId = null;
+    };
+
+    const pushStatus = async (status: string) => {
+      const client = await getClient();
+      if (!client) return;
+      try {
+        await client.setThreadStatus({
+          channelId: input.channelId,
+          threadTs: input.threadTs,
+          status,
+        });
+      } catch (error) {
+        logger.debug(
+          {
+            err: error,
+            channelId: input.channelId,
+            threadTs: input.threadTs,
+            status,
+          },
+          "failed to update Slack control thread status",
+        );
+      }
+    };
+
+    const ensureRefresh = () => {
+      if (intervalId || !currentStatus) return;
+      intervalId = setInterval(() => {
+        if (stopped || !currentStatus) {
+          clearRefresh();
+          return;
+        }
+        void pushStatus(currentStatus);
+      }, SLACK_THREAD_STATUS_REFRESH_MS);
+    };
+
+    return {
+      async start(status: string) {
+        if (stopped) return;
+        currentStatus = status;
+        await pushStatus(status);
+        ensureRefresh();
+      },
+      async update(status: string) {
+        if (stopped || !status || status === currentStatus) return;
+        currentStatus = status;
+        await pushStatus(status);
+        ensureRefresh();
+      },
+      async stop() {
+        if (stopped) return;
+        stopped = true;
+        clearRefresh();
+        if (!currentStatus) return;
+        currentStatus = "";
+        await pushStatus("");
+      },
+    };
+  }
+
+  async function resolveSlackUserLabel(input: {
+    companyId: string;
+    slackUserId?: string | null;
+  }) {
+    const slackUserId = readNonEmptyString(input.slackUserId);
+    if (!slackUserId) return "Slack user";
+
+    const cacheKey = `${input.companyId}:${slackUserId}`;
+    const cached = slackUserLabelCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const promise = (async () => {
+      const agentRow = await db
+        .select({
+          name: agents.name,
+          title: agents.title,
+          role: agents.role,
+        })
+        .from(agentSlackApps)
+        .innerJoin(agents, eq(agentSlackApps.agentId, agents.id))
+        .where(and(
+          eq(agentSlackApps.companyId, input.companyId),
+          eq(agentSlackApps.botUserId, slackUserId),
+        ))
+        .then((rows) => rows[0] ?? null);
+      if (agentRow) {
+        return formatReadableAgentLabel(agentRow);
+      }
+
+      const client = await getControlClient();
+      if (client) {
+        try {
+          const result = await client.getUserInfo({ userId: slackUserId });
+          const user = result.user;
+          const label = readNonEmptyString(
+            user?.profile?.display_name_normalized
+            ?? user?.profile?.display_name
+            ?? user?.real_name_normalized
+            ?? user?.real_name
+            ?? user?.name,
+          );
+          if (label) {
+            return label;
+          }
+        } catch (error) {
+          logger.debug({ err: error, slackUserId }, "failed to resolve Slack user label");
+        }
+      }
+
+      return "Slack user";
+    })();
+
+    slackUserLabelCache.set(cacheKey, promise);
+    return promise;
+  }
+
+  async function resolveSlackChannelLabel(input: {
+    channelId: string;
+    channelName?: string | null;
+  }) {
+    const channelId = readNonEmptyString(input.channelId);
+    if (!channelId) return "Slack channel";
+    const directName = readNonEmptyString(input.channelName);
+    if (directName) {
+      return `#${directName}`;
+    }
+
+    const cached = slackChannelLabelCache.get(channelId);
+    if (cached) {
+      return cached;
+    }
+
+    const promise = db
+      .select({ channelName: projectSlackChannels.channelName })
+      .from(projectSlackChannels)
+      .where(eq(projectSlackChannels.channelId, channelId))
+      .then((rows) => rows[0] ?? null)
+      .then((row) => {
+        const channelName = readNonEmptyString(row?.channelName);
+        return channelName ? `#${channelName}` : "Slack channel";
+      });
+
+    slackChannelLabelCache.set(channelId, promise);
+    return promise;
+  }
+
+  async function resolveSlackThreadPermalink(input: {
+    channelId: string;
+    threadTs: string;
+  }) {
+    const channelId = readNonEmptyString(input.channelId);
+    const threadTs = readNonEmptyString(input.threadTs);
+    if (!channelId || !threadTs) return null;
+
+    const cacheKey = `${channelId}:${threadTs}`;
+    const cached = slackThreadPermalinkCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const promise = (async () => {
+      const client = await getControlClient();
+      if (!client) return null;
+      try {
+        const result = await client.getPermalink({
+          channel: channelId,
+          messageTs: threadTs,
+        });
+        return readNonEmptyString(result.permalink);
+      } catch (error) {
+        logger.debug({ err: error, channelId, threadTs }, "failed to resolve Slack thread permalink");
+        return null;
+      }
+    })();
+
+    slackThreadPermalinkCache.set(cacheKey, promise);
+    return promise;
+  }
+
+  async function formatSlackTextForBoard(input: {
+    companyId: string;
+    text: string;
+  }) {
+    let formatted = input.text.trim();
+    for (const slackUserId of extractSlackMentionIds(formatted)) {
+      const label = await resolveSlackUserLabel({
+        companyId: input.companyId,
+        slackUserId,
+      });
+      formatted = formatted.replaceAll(`<@${slackUserId}>`, label);
+    }
+    return formatted;
+  }
+
+  async function buildSlackOriginDescription(input: {
+    companyId: string;
+    text: string;
+    slackUserId?: string | null;
+    channelId: string;
+    channelName?: string | null;
+    threadTs: string;
+  }) {
+    const [userLabel, channelLabel, threadPermalink, formattedText] = await Promise.all([
+      resolveSlackUserLabel({ companyId: input.companyId, slackUserId: input.slackUserId }),
+      resolveSlackChannelLabel({ channelId: input.channelId, channelName: input.channelName }),
+      resolveSlackThreadPermalink({ channelId: input.channelId, threadTs: input.threadTs }),
+      formatSlackTextForBoard({ companyId: input.companyId, text: input.text }),
+    ]);
+
+    return [
+      "_Created from Slack_",
+      `Requested by: ${userLabel}`,
+      `Channel: ${channelLabel}`,
+      `Thread: ${threadPermalink ?? `${channelLabel} thread`}`,
+      "",
+      formattedText,
+    ].join("\n");
+  }
+
+  async function buildSlackCommentBody(input: {
+    companyId: string;
+    text: string;
+    slackUserId?: string | null;
+    channelId: string;
+    channelName?: string | null;
+    threadTs: string;
+  }) {
+    const [userLabel, channelLabel, threadPermalink, formattedText] = await Promise.all([
+      resolveSlackUserLabel({ companyId: input.companyId, slackUserId: input.slackUserId }),
+      resolveSlackChannelLabel({ channelId: input.channelId, channelName: input.channelName }),
+      resolveSlackThreadPermalink({ channelId: input.channelId, threadTs: input.threadTs }),
+      formatSlackTextForBoard({ companyId: input.companyId, text: input.text }),
+    ]);
+
+    return [
+      `Slack reply from ${userLabel}`,
+      `Channel: ${channelLabel}`,
+      `Thread: ${threadPermalink ?? `${channelLabel} thread`}`,
+      "",
+      formattedText,
+    ].join("\n");
+  }
+
+  async function buildSlackActionCommentBody(input: {
+    companyId: string;
+    text: string;
+    summary?: string | null;
+    slackUserId?: string | null;
+    channelId: string;
+    channelName?: string | null;
+    threadTs: string;
+  }) {
+    const rawSummary = readNonEmptyString(input.summary);
+    const [summary, formattedOriginal, original] = await Promise.all([
+      rawSummary
+        ? formatSlackTextForBoard({
+            companyId: input.companyId,
+            text: rawSummary,
+          })
+        : Promise.resolve<string | null>(null),
+      formatSlackTextForBoard({
+        companyId: input.companyId,
+        text: input.text,
+      }),
+      buildSlackCommentBody(input),
+    ]);
+
+    if (!summary || collapseWhitespace(summary) === collapseWhitespace(formattedOriginal)) {
+      return original;
+    }
+    return [
+      summary,
+      "",
+      "---",
+      "",
+      original,
+    ].join("\n");
+  }
+
+  function buildSlackActionDetails(input: {
+    channelId: string;
+    threadTs: string;
+    slackUserId?: string | null;
+    slackUserName?: string | null;
+    messageTs?: string | null;
+    eventId?: string | null;
+  }) {
+    return {
+      source: "slack",
+      slackChannelId: input.channelId,
+      slackThreadTs: input.threadTs,
+      slackUserId: input.slackUserId ?? null,
+      slackUserName: input.slackUserName ?? null,
+      slackMessageTs: input.messageTs ?? null,
+      slackEventId: input.eventId ?? null,
+    };
+  }
+
+  async function createSlackActionRun(input: {
+    companyId: string;
+    projectId: string | null;
+    issueId: string | null;
+    eventId: string;
+    channelId: string;
+    threadTs: string;
+    messageTs: string;
+    slackUserId: string | null;
+    slackUserName: string | null;
+    requestText: string;
+    normalizedText: string;
+  }) {
+    return db
+      .insert(slackActionRuns)
+      .values({
+        companyId: input.companyId,
+        projectId: input.projectId,
+        issueId: input.issueId,
+        eventId: input.eventId,
+        channelId: input.channelId,
+        threadTs: input.threadTs,
+        messageTs: input.messageTs,
+        slackUserId: input.slackUserId,
+        slackUserName: input.slackUserName,
+        status: "received",
+        requestText: input.requestText,
+        normalizedText: input.normalizedText,
+      })
+      .returning()
+      .then((rows) => rows[0] ?? null);
+  }
+
+  async function updateSlackActionRun(
+    actionRunId: string,
+    input: {
+      projectId?: string | null;
+      issueId?: string | null;
+      status: SlackActionRunStatus;
+      actionType?: string | null;
+      confidence?: number | null;
+      interpreterResult?: SlackControlInterpreterResult | null;
+      executionResult?: Record<string, unknown> | null;
+      error?: string | null;
+    },
+  ) {
+    await db
+      .update(slackActionRuns)
+      .set({
+        ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+        ...(input.issueId !== undefined ? { issueId: input.issueId } : {}),
+        status: input.status,
+        actionType: input.actionType ?? null,
+        confidence:
+          typeof input.confidence === "number" && Number.isFinite(input.confidence)
+            ? input.confidence.toFixed(3)
+            : null,
+        interpreterResult: input.interpreterResult
+          ? (input.interpreterResult as unknown as Record<string, unknown>)
+          : null,
+        executionResult: input.executionResult ?? null,
+        error: input.error ?? null,
+        updatedAt: new Date(),
+      })
+      .where(eq(slackActionRuns.id, actionRunId));
+  }
+
+  async function postControlThreadReply(input: {
+    channelId: string;
+    threadTs: string;
+    text: string;
+  }) {
+    const client = await getControlClient();
+    if (!client) return null;
+    try {
+      return await client.postMessage({
+        channel: input.channelId,
+        threadTs: input.threadTs,
+        text: input.text,
+      });
+    } catch (error) {
+      logger.warn(
+        { err: error, channelId: input.channelId, threadTs: input.threadTs },
+        "failed to post Slack control reply",
+      );
+      return null;
+    }
+  }
+
+  async function listRecentSlackMessages(channelId: string, threadTs: string) {
+    const client = await getControlClient();
+    if (!client) return [];
+    try {
+      const result = await client.listThreadReplies({
+        channel: channelId,
+        threadTs,
+        limit: interpreter.getSettings().contextLimit,
+      });
+      return (result.messages ?? [])
+        .filter((message) => !message.bot_id && !message.subtype)
+        .map((message) => ({
+          author: readNonEmptyString(message.user),
+          text: collapseWhitespace(message.text ?? ""),
+          ts: readNonEmptyString(message.ts) ?? threadTs,
+        }))
+        .filter((entry) => entry.text.length > 0);
+    } catch (error) {
+      logger.debug({ err: error, channelId, threadTs }, "failed to load recent Slack thread replies");
+      return [];
+    }
+  }
+
+  async function loadAgentCandidates(companyId: string) {
+    const mappingEntries = parseSlackLookupMappings(
+      instanceSettings.getRuntimeValue("slackAgentMappingsJson"),
+    );
+    const rows = await agentsSvc.list(companyId);
+    const agentIds = rows.map((agent) => agent.id);
+    const installedApps = agentIds.length
+      ? await db
+          .select({
+            agentId: agentSlackApps.agentId,
+            botUserId: agentSlackApps.botUserId,
+            slackAppId: agentSlackApps.slackAppId,
+            installStatus: agentSlackApps.installStatus,
+          })
+          .from(agentSlackApps)
+          .where(and(
+            eq(agentSlackApps.companyId, companyId),
+            inArray(agentSlackApps.agentId, agentIds),
+          ))
+      : [];
+    const installedAppByAgentId = new Map(
+      installedApps.map((app) => [app.agentId, app]),
+    );
+    const candidates: SlackInterpreterCandidateAgent[] = rows.map((agent) => {
+      const aliases = readReferenceAliases(agent.metadata)?.aliases ?? [];
+      const installedApp = installedAppByAgentId.get(agent.id);
+      const slackKeys = Array.from(mappingEntries.entries())
+        .filter(([, value]) => {
+          const normalizedValue = normalizeLookupKey(value);
+          return (
+            value === agent.id ||
+            normalizedValue === normalizeLookupKey(agent.id) ||
+            normalizedValue === normalizeLookupKey(agent.urlKey) ||
+            normalizedValue === normalizeLookupKey(agent.name) ||
+            aliases.includes(normalizedValue ?? "")
+          );
+        })
+        .map(([key]) => key);
+      if (installedApp?.installStatus === "active") {
+        const botUserId = readNonEmptyString(installedApp.botUserId);
+        if (botUserId) {
+          slackKeys.push(botUserId);
+        }
+        const slackAppId = readNonEmptyString(installedApp.slackAppId);
+        if (slackAppId) {
+          slackKeys.push(slackAppId);
+        }
+      }
+      return {
+        id: agent.id,
+        name: agent.name,
+        urlKey: readNonEmptyString(agent.urlKey),
+        aliases,
+        slackKeys: uniqueStrings(slackKeys),
+      };
+    });
+    return {
+      mappings: mappingEntries,
+      candidates,
+    };
+  }
+
+  async function loadProjectCandidates(companyId: string) {
+    const mappingEntries = parseSlackLookupMappings(
+      instanceSettings.getRuntimeValue("slackProjectMappingsJson"),
+    );
+    const rows = await projectsSvc.list(companyId);
+    const candidates: SlackInterpreterCandidateProject[] = rows.map((project) => {
+      const aliases = readReferenceAliases(project.metadata)?.aliases ?? [];
+      const slackKeys = Array.from(mappingEntries.entries())
+        .filter(([, value]) => {
+          const normalizedValue = normalizeLookupKey(value);
+          return (
+            value === project.id ||
+            normalizedValue === normalizeLookupKey(project.id) ||
+            normalizedValue === normalizeLookupKey(project.urlKey) ||
+            normalizedValue === normalizeLookupKey(project.name) ||
+            aliases.includes(normalizedValue ?? "")
+          );
+        })
+        .map(([key]) => key);
+      return {
+        id: project.id,
+        name: project.name,
+        urlKey: readNonEmptyString(project.urlKey),
+        aliases,
+        slackKeys,
+      };
+    });
+    return {
+      mappings: mappingEntries,
+      candidates,
+    };
+  }
+
+  function resolveAgentReference(
+    ref: string | null | undefined,
+    candidates: SlackInterpreterCandidateAgent[],
+    mappings: Map<string, string>,
+  ) {
+    const raw = readNonEmptyString(ref);
+    if (!raw) return null;
+    const normalized = normalizeLookupKey(raw);
+    const mapped = normalized ? mappings.get(normalized) : null;
+
+    const exact = candidates.find((candidate) => candidate.id === raw);
+    if (exact) return exact;
+
+    const mappedCandidate = mapped
+      ? candidates.find((candidate) => candidate.id === mapped)
+      : null;
+    if (mappedCandidate) return mappedCandidate;
+
+    if (normalized) {
+      const byAlias = candidates.find((candidate) =>
+        candidate.aliases.includes(normalized) ||
+        candidate.slackKeys.includes(normalized) ||
+        normalizeLookupKey(candidate.urlKey) === normalized ||
+        normalizeLookupKey(candidate.name) === normalized,
+      );
+      if (byAlias) return byAlias;
+    }
+
+    return null;
+  }
+
+  function resolveMentionedAgentIds(
+    text: string,
+    candidates: SlackInterpreterCandidateAgent[],
+    mappings: Map<string, string>,
+  ) {
+    const tokens = uniqueStrings([
+      ...extractSlackMentionIds(text),
+      ...extractPlainAgentMentions(text),
+    ]);
+    return uniqueStrings(
+      tokens
+        .map((token) => resolveAgentReference(token, candidates, mappings)?.id ?? null),
+    );
+  }
+
+  function resolveProjectReference(
+    ref: string | null | undefined,
+    candidates: SlackInterpreterCandidateProject[],
+    mappings: Map<string, string>,
+  ) {
+    const raw = readNonEmptyString(ref);
+    if (!raw) return null;
+    const normalized = normalizeLookupKey(raw);
+    const mapped = normalized ? mappings.get(normalized) : null;
+
+    const exact = candidates.find((candidate) => candidate.id === raw);
+    if (exact) return exact;
+
+    const mappedCandidate = mapped
+      ? candidates.find((candidate) => candidate.id === mapped)
+      : null;
+    if (mappedCandidate) return mappedCandidate;
+
+    if (normalized) {
+      const byAlias = candidates.find((candidate) =>
+        candidate.aliases.includes(normalized) ||
+        candidate.slackKeys.includes(normalized) ||
+        normalizeLookupKey(candidate.urlKey) === normalized ||
+        normalizeLookupKey(candidate.name) === normalized,
+      );
+      if (byAlias) return byAlias;
+    }
+
+    return null;
+  }
+
+  async function loadIssueCandidates(input: {
+    companyId: string;
+    projectId: string | null;
+    normalizedText: string;
+    linkedIssue: SlackIssue | null;
+  }) {
+    const candidates = new Map<string, SlackInterpreterCandidateIssue>();
+    const addIssue = (issue: SlackIssue | null | undefined, projectName: string | null = null) => {
+      if (!issue) return;
+      candidates.set(issue.id, {
+        id: issue.id,
+        identifier: issue.identifier ?? null,
+        title: issue.title,
+        projectId: issue.projectId ?? null,
+        projectName,
+        status: issue.status,
+        priority: issue.priority,
+        assigneeAgentId: issue.assigneeAgentId ?? null,
+      });
+    };
+
+    if (input.linkedIssue) {
+      addIssue(input.linkedIssue, await getProjectName(input.linkedIssue.projectId));
+    }
+
+    const identifierMatches = uniqueStrings(
+      Array.from(input.normalizedText.matchAll(/\b([A-Z]+-\d+)\b/gi)).map(
+        (match) => match[1]?.toUpperCase() ?? "",
+      ),
+    );
+    for (const identifier of identifierMatches) {
+      const issue = await issuesSvc.getByIdentifier(identifier);
+      if (issue && issue.companyId === input.companyId) {
+        addIssue(issue, await getProjectName(issue.projectId));
+      }
+    }
+
+    const searchText = input.normalizedText.slice(0, 160);
+    if (searchText.length > 0) {
+      const matches = await issuesSvc.list(input.companyId, {
+        ...(input.projectId ? { projectId: input.projectId } : {}),
+        q: searchText,
+      });
+      for (const issue of matches.slice(0, 8)) {
+        addIssue(issue, await getProjectName(issue.projectId));
+      }
+    }
+
+    return Array.from(candidates.values());
+  }
+
+  async function resolveIssueReference(
+    ref: string | null | undefined,
+    input: {
+      companyId: string;
+      linkedIssue: SlackIssue | null;
+      candidateIssues: SlackInterpreterCandidateIssue[];
+    },
+  ) {
+    const raw = readNonEmptyString(ref);
+    if (!raw) return input.linkedIssue;
+    if (input.linkedIssue) {
+      const normalized = raw.toLowerCase();
+      if (normalized === "this" || normalized === "current" || normalized === "it") {
+        return input.linkedIssue;
+      }
+    }
+
+    const directId = await issuesSvc.getById(raw);
+    if (directId && directId.companyId === input.companyId) return directId;
+
+    if (/^[A-Z]+-\d+$/i.test(raw)) {
+      const byIdentifier = await issuesSvc.getByIdentifier(raw.toUpperCase());
+      if (byIdentifier && byIdentifier.companyId === input.companyId) return byIdentifier;
+    }
+
+    const byCandidate = input.candidateIssues.find((issue) =>
+      issue.id === raw ||
+      issue.identifier === raw.toUpperCase() ||
+      collapseWhitespace(issue.title).toLowerCase() === collapseWhitespace(raw).toLowerCase(),
+    );
+    if (byCandidate) {
+      return issuesSvc.getById(byCandidate.id);
+    }
+
+    return null;
+  }
+
+  async function buildInterpreterInput(input: {
+    projectChannel: typeof projectSlackChannels.$inferSelect;
+    threadLink: SlackThreadLink | null;
+    event: SlackControlMessageEvent;
+    normalizedText: string;
+    threadTs: string;
+    isThreadReply: boolean;
+  }): Promise<{
+    messageContext: SlackControlMessageContext;
+    payload: SlackActionInterpreterInput;
+    mappedAgents: Map<string, string>;
+    mappedProjects: Map<string, string>;
+  }> {
+    const linkedIssue = input.threadLink
+      ? await issuesSvc.getById(input.threadLink.issueId)
+      : null;
+    const project = input.projectChannel.projectId
+      ? await projectsSvc.getById(input.projectChannel.projectId)
+      : null;
+    const projectChannelId = input.projectChannel.channelId ?? "";
+    const recentSlackMessages = await listRecentSlackMessages(
+      projectChannelId,
+      input.threadTs,
+    );
+    const recentIssueComments = linkedIssue
+      ? (await issuesSvc.listComments(linkedIssue.id))
+          .slice(0, interpreter.getSettings().contextLimit)
+          .reverse()
+          .map((comment) => ({
+            authorAgentId: comment.authorAgentId ?? null,
+            authorUserId: comment.authorUserId ?? null,
+            body: comment.body,
+            createdAt: comment.createdAt.toISOString(),
+          }))
+      : [];
+
+    const { candidates: candidateAgents, mappings: mappedAgents } = await loadAgentCandidates(
+      input.projectChannel.companyId,
+    );
+    const { candidates: candidateProjects, mappings: mappedProjects } = await loadProjectCandidates(
+      input.projectChannel.companyId,
+    );
+    const candidateIssues = await loadIssueCandidates({
+      companyId: input.projectChannel.companyId,
+      projectId: input.projectChannel.projectId,
+      normalizedText: input.normalizedText,
+      linkedIssue,
+    });
+
+    const messageContext: SlackControlMessageContext = {
+      companyId: input.projectChannel.companyId,
+      projectId: input.projectChannel.projectId,
+      issueId: linkedIssue?.id ?? null,
+      channelId: projectChannelId,
+      channelName: input.projectChannel.channelName,
+      threadTs: input.threadTs,
+      messageTs: readNonEmptyString(input.event.ts) ?? input.threadTs,
+      authorSlackUserId: readNonEmptyString(input.event.user),
+      authorSlackUserName: null,
+      originalText: input.event.text ?? "",
+      normalizedText: input.normalizedText,
+      isThreadReply: input.isThreadReply,
+      isLinkedIssueThread: Boolean(input.threadLink),
+      isRootProjectMessage: !input.isThreadReply,
+    };
+
+    return {
+      messageContext,
+      mappedAgents,
+      mappedProjects,
+      payload: {
+        message: messageContext,
+        project: project
+          ? {
+              id: project.id,
+              name: project.name,
+              urlKey: project.urlKey ?? null,
+              status: project.status,
+            }
+          : null,
+        linkedIssue: linkedIssue
+          ? {
+              id: linkedIssue.id,
+              identifier: linkedIssue.identifier ?? null,
+              title: linkedIssue.title,
+              description: linkedIssue.description ?? null,
+              projectId: linkedIssue.projectId ?? null,
+              status: linkedIssue.status,
+              priority: linkedIssue.priority,
+              assigneeAgentId: linkedIssue.assigneeAgentId ?? null,
+              assigneeUserId: linkedIssue.assigneeUserId ?? null,
+            }
+          : null,
+        recentSlackMessages,
+        recentIssueComments,
+        candidateAgents,
+        candidateProjects,
+        candidateIssues,
+      },
+    };
+  }
+
+  async function executeSlackAction(input: {
+    projectChannel: typeof projectSlackChannels.$inferSelect;
+    threadLink: SlackThreadLink | null;
+    threadTs: string;
+    eventId: string;
+    event: SlackControlMessageEvent;
+    interpretation: SlackControlInterpreterResult;
+    messageContext: SlackControlMessageContext;
+    mappedAgents: Map<string, string>;
+    mappedProjects: Map<string, string>;
+    candidateAgents: SlackInterpreterCandidateAgent[];
+    candidateProjects: SlackInterpreterCandidateProject[];
+    candidateIssues: SlackInterpreterCandidateIssue[];
+  }): Promise<SlackActionExecutionOutcome> {
+    const mutation = input.interpretation.normalizedMutation;
+    const actionType = input.interpretation.actionType;
+    const issueRef = mutation?.issueRef ?? input.interpretation.targetIssueRef;
+    const parentIssueRef = mutation?.parentIssueRef ?? input.interpretation.targetIssueRef;
+    const agentRef = mutation?.assigneeAgentRef ?? input.interpretation.targetAgentRef;
+    const projectRef = mutation?.projectRef ?? input.interpretation.targetProjectRef;
+    const linkedIssue = input.threadLink ? await issuesSvc.getById(input.threadLink.issueId) : null;
+
+    if (
+      actionType === "clarify" ||
+      input.interpretation.needsClarification ||
+      (actionType !== "query" && actionType !== "noop" && input.interpretation.confidence < SLACK_AUTO_APPLY_CONFIDENCE)
+    ) {
+      return {
+        status: "clarification",
+        slackReply: input.interpretation.slackReply,
+        issue: toSlackIssue(linkedIssue),
+        canonicalLink: input.threadLink,
+        executionResult: {
+          actionType,
+          reason: input.interpretation.reasons,
+        },
+      };
+    }
+
+    if (actionType === "query" || actionType === "noop") {
+      return {
+        status: "ignored",
+        slackReply: input.interpretation.slackReply,
+        issue: toSlackIssue(linkedIssue),
+        canonicalLink: input.threadLink,
+        executionResult: {
+          actionType,
+        },
+      };
+    }
+
+    const resolvedAgent = resolveAgentReference(agentRef, input.candidateAgents, input.mappedAgents);
+    const resolvedProject =
+      resolveProjectReference(projectRef, input.candidateProjects, input.mappedProjects)
+      ?? input.candidateProjects.find((project) => project.id === input.projectChannel.projectId)
+      ?? null;
+    const resolvedIssue = await resolveIssueReference(issueRef, {
+      companyId: input.projectChannel.companyId,
+      linkedIssue,
+      candidateIssues: input.candidateIssues,
+    });
+    const resolvedParentIssue = await resolveIssueReference(parentIssueRef, {
+      companyId: input.projectChannel.companyId,
+      linkedIssue,
+      candidateIssues: input.candidateIssues,
+    });
+    const mentionedAgentIds = resolveMentionedAgentIds(
+      input.messageContext.originalText,
+      input.candidateAgents,
+      input.mappedAgents,
+    );
+    const details = buildSlackActionDetails({
+      channelId: input.projectChannel.channelId ?? input.messageContext.channelId,
+      threadTs: input.threadTs,
+      slackUserId: input.event.user ?? null,
+      slackUserName: null,
+      messageTs: input.event.ts ?? null,
+      eventId: input.eventId,
+    });
+    const actor = {
+      actorType: "system" as const,
+      actorId: SLACK_SYSTEM_ACTOR_ID,
+      agentId: null,
+      runId: null,
+    };
+
+    switch (actionType) {
+      case "create_issue": {
+        const projectId = resolvedProject?.id ?? input.projectChannel.projectId;
+        const title = readNonEmptyString(mutation?.title);
+        if (!projectId || !title) {
+          return {
+            status: "clarification",
+            slackReply: "I need a project and a ticket title before I can create that issue.",
+            issue: null,
+            canonicalLink: input.threadLink,
+            executionResult: { actionType, missing: ["projectId", "title"] },
+          };
+        }
+
+        const issue = await issueCommands.createIssue(
+          input.projectChannel.companyId,
+          {
+            projectId,
+            title,
+            description: await buildSlackOriginDescription({
+              companyId: input.projectChannel.companyId,
+              text: mutation?.description ?? input.messageContext.originalText,
+              slackUserId: input.event.user ?? null,
+              channelId: input.projectChannel.channelId ?? input.messageContext.channelId,
+              channelName: input.projectChannel.channelName,
+              threadTs: input.threadTs,
+            }),
+            status: mutation?.status ?? (resolvedAgent ? "todo" : "backlog"),
+            priority: mutation?.priority ?? "medium",
+            assigneeAgentId: resolvedAgent?.id ?? null,
+          },
+          actor,
+          { details },
+        );
+
+        const link = await activateThreadLink({
+          companyId: issue.companyId,
+          issueId: issue.id,
+          projectId: issue.projectId ?? null,
+          projectSlackChannelId: input.projectChannel.id,
+          channelId: input.projectChannel.channelId ?? input.messageContext.channelId,
+          threadTs: input.threadTs,
+        });
+
+        const persistedComment = mutation?.commentBody || input.interpretation.commentaryToPersist
+          ? await buildSlackActionCommentBody({
+              companyId: input.projectChannel.companyId,
+              text: input.messageContext.originalText,
+              summary: mutation?.commentBody ?? input.interpretation.commentaryToPersist,
+              slackUserId: input.event.user ?? null,
+              channelId: input.projectChannel.channelId ?? input.messageContext.channelId,
+              channelName: input.projectChannel.channelName,
+              threadTs: input.threadTs,
+            })
+          : null;
+        if (persistedComment) {
+          await issueCommands.addComment(issue.id, persistedComment, actor, {
+            details,
+            mentionedAgentIds,
+          });
+        }
+
+        return {
+          status: "executed",
+          slackReply: input.interpretation.slackReply,
+          issue: toSlackIssue(issue),
+          canonicalLink: link,
+          executionResult: {
+            actionType,
+            issueId: issue.id,
+            identifier: issue.identifier,
+          },
+        };
+      }
+
+      case "create_child_issue": {
+        const parentIssue = resolvedParentIssue ?? linkedIssue;
+        const title = readNonEmptyString(mutation?.title);
+        const projectId = resolvedProject?.id ?? parentIssue?.projectId ?? input.projectChannel.projectId;
+        if (!parentIssue || !projectId || !title) {
+          return {
+            status: "clarification",
+            slackReply: "I need the parent issue and child ticket title before I can create that subtask.",
+            issue: toSlackIssue(parentIssue),
+            canonicalLink: input.threadLink,
+            executionResult: { actionType, missing: ["parentIssue", "projectId", "title"] },
+          };
+        }
+
+        const issue = await issueCommands.createIssue(
+          input.projectChannel.companyId,
+          {
+            projectId,
+            parentId: parentIssue.id,
+            title,
+            description: await buildSlackOriginDescription({
+              companyId: input.projectChannel.companyId,
+              text: mutation?.description ?? input.messageContext.originalText,
+              slackUserId: input.event.user ?? null,
+              channelId: input.projectChannel.channelId ?? input.messageContext.channelId,
+              channelName: input.projectChannel.channelName,
+              threadTs: input.threadTs,
+            }),
+            status: mutation?.status ?? (resolvedAgent ? "todo" : "backlog"),
+            priority: mutation?.priority ?? "medium",
+            assigneeAgentId: resolvedAgent?.id ?? null,
+          },
+          actor,
+          { details },
+        );
+
+        const link = await ensureIssueThreadLink(issue);
+        const childReply = readNonEmptyString(input.interpretation.slackReply)
+          ?? `Created child issue *${issueDisplay(issue)}*.`;
+        if (link) {
+          await postControlThreadReply({
+            channelId: link.channelId,
+            threadTs: link.threadTs,
+            text: childReply,
+          });
+        }
+
+        return {
+          status: "executed",
+          slackReply: childReply,
+          issue: toSlackIssue(issue),
+          canonicalLink: link,
+          executionResult: {
+            actionType,
+            issueId: issue.id,
+            parentIssueId: parentIssue.id,
+            identifier: issue.identifier,
+          },
+        };
+      }
+
+      case "update_issue": {
+        const issue = resolvedIssue ?? linkedIssue;
+        if (!issue) {
+          return {
+            status: "clarification",
+            slackReply: "I could not determine which issue you want to update.",
+            issue: null,
+            canonicalLink: input.threadLink,
+            executionResult: { actionType, missing: ["issue"] },
+          };
+        }
+
+        const updateFields: Record<string, unknown> = {};
+        if (mutation?.title) updateFields.title = mutation.title;
+        if (mutation?.description) updateFields.description = mutation.description;
+        if (mutation?.status) updateFields.status = mutation.status;
+        if (mutation?.priority) updateFields.priority = mutation.priority;
+        if (resolvedAgent) updateFields.assigneeAgentId = resolvedAgent.id;
+        if (resolvedProject && resolvedProject.id !== issue.projectId) updateFields.projectId = resolvedProject.id;
+        if (mutation?.goalRef) updateFields.goalId = mutation.goalRef;
+
+        const commentText =
+          readNonEmptyString(mutation?.commentBody)
+          ?? readNonEmptyString(input.interpretation.commentaryToPersist)
+          ?? (mutation?.persistOriginalMessage ? input.messageContext.originalText : null);
+        const commentBody = commentText
+          ? await buildSlackActionCommentBody({
+              companyId: input.projectChannel.companyId,
+              text: input.messageContext.originalText,
+              summary: commentText,
+              slackUserId: input.event.user ?? null,
+              channelId: input.projectChannel.channelId ?? input.messageContext.channelId,
+              channelName: input.projectChannel.channelName,
+              threadTs: input.threadTs,
+            })
+          : null;
+
+        if (Object.keys(updateFields).length === 0 && commentBody) {
+          const comment = await issueCommands.addComment(issue.id, commentBody, actor, {
+            details,
+            mentionedAgentIds,
+          });
+          return {
+            status: "executed",
+            slackReply: input.interpretation.slackReply,
+            issue: toSlackIssue(issue),
+            canonicalLink: await getThreadLinkByIssue(issue.id),
+            executionResult: {
+              actionType: "add_comment",
+              issueId: issue.id,
+              commentId: comment?.id ?? null,
+            },
+          };
+        }
+
+        if (Object.keys(updateFields).length === 0) {
+          return {
+            status: "clarification",
+            slackReply: "I did not find any concrete issue changes to apply.",
+            issue: toSlackIssue(issue),
+            canonicalLink: await getThreadLinkByIssue(issue.id),
+            executionResult: {
+              actionType,
+              missing: ["mutation"],
+            },
+          };
+        }
+
+        const updated = await issueCommands.updateIssue(issue.id, updateFields, actor, {
+          comment: commentBody,
+          details,
+          mentionedAgentIds,
+        });
+        const latestIssue = updated?.issue ?? issue;
+        const link =
+          Object.prototype.hasOwnProperty.call(updateFields, "projectId")
+            ? await ensureIssueThreadLink(latestIssue)
+            : await getThreadLinkByIssue(latestIssue.id);
+
+        return {
+          status: "executed",
+          slackReply: input.interpretation.slackReply,
+          issue: toSlackIssue(latestIssue),
+          canonicalLink: link,
+          executionResult: {
+            actionType,
+            issueId: latestIssue.id,
+            commentId: updated?.comment?.id ?? null,
+          },
+        };
+      }
+
+      case "add_comment": {
+        const issue = resolvedIssue ?? linkedIssue;
+        if (!issue) {
+          return {
+            status: "clarification",
+            slackReply: "I could not determine which issue should receive that comment.",
+            issue: null,
+            canonicalLink: input.threadLink,
+            executionResult: { actionType, missing: ["issue"] },
+          };
+        }
+
+        const commentBody = await buildSlackActionCommentBody({
+          companyId: input.projectChannel.companyId,
+          text: input.messageContext.originalText,
+          summary:
+            mutation?.commentBody
+            ?? input.interpretation.commentaryToPersist
+            ?? input.messageContext.originalText,
+          slackUserId: input.event.user ?? null,
+          channelId: input.projectChannel.channelId ?? input.messageContext.channelId,
+          channelName: input.projectChannel.channelName,
+          threadTs: input.threadTs,
+        });
+        const comment = await issueCommands.addComment(issue.id, commentBody, actor, {
+          details,
+          mentionedAgentIds,
+        });
+        return {
+          status: "executed",
+          slackReply: input.interpretation.slackReply,
+          issue: toSlackIssue(issue),
+          canonicalLink: await getThreadLinkByIssue(issue.id),
+          executionResult: {
+            actionType,
+            issueId: issue.id,
+            commentId: comment?.id ?? null,
+          },
+        };
+      }
+
+      case "checkout_issue": {
+        const issue = resolvedIssue ?? linkedIssue;
+        const checkoutAgent = resolvedAgent
+          ?? (issue?.assigneeAgentId
+            ? input.candidateAgents.find((candidate) => candidate.id === issue.assigneeAgentId) ?? null
+            : null);
+        if (!issue || !checkoutAgent) {
+          return {
+            status: "clarification",
+            slackReply: "I need both the target issue and the assignee agent before I can start work.",
+            issue: toSlackIssue(issue),
+            canonicalLink: input.threadLink,
+            executionResult: { actionType, missing: ["issue", "agent"] },
+          };
+        }
+
+        const updated = await issueCommands.checkoutIssue(
+          issue.id,
+          checkoutAgent.id,
+          mutation?.expectedStatuses?.length ? mutation.expectedStatuses : [issue.status],
+          actor,
+          null,
+          { details },
+        );
+        return {
+          status: "executed",
+          slackReply: input.interpretation.slackReply,
+          issue: toSlackIssue(updated),
+          canonicalLink: await getThreadLinkByIssue(issue.id),
+          executionResult: {
+            actionType,
+            issueId: issue.id,
+            agentId: checkoutAgent.id,
+          },
+        };
+      }
+
+      case "release_issue": {
+        const issue = resolvedIssue ?? linkedIssue;
+        if (!issue) {
+          return {
+            status: "clarification",
+            slackReply: "I could not determine which issue should be released.",
+            issue: null,
+            canonicalLink: input.threadLink,
+            executionResult: { actionType, missing: ["issue"] },
+          };
+        }
+        const released = await issueCommands.releaseIssue(issue.id, actor, null, { details });
+        return {
+          status: "executed",
+          slackReply: input.interpretation.slackReply,
+          issue: toSlackIssue(released),
+          canonicalLink: await getThreadLinkByIssue(issue.id),
+          executionResult: {
+            actionType,
+            issueId: issue.id,
+          },
+        };
+      }
+
+      default:
+        return {
+          status: "clarification",
+          slackReply: "I could not determine the Slack action to execute.",
+          issue: toSlackIssue(linkedIssue),
+          canonicalLink: input.threadLink,
+          executionResult: {
+            actionType,
+            unsupported: true,
+          },
+        };
+    }
   }
 
   async function ensureConfiguredChannelMembers(input: {
@@ -1280,10 +2682,12 @@ export function slackIntegrationService(db: Db) {
     const issue = await issuesSvc.create(input.projectChannel.companyId, {
       projectId: input.projectChannel.projectId,
       title: task.title,
-      description: buildSlackOriginDescription({
+      description: await buildSlackOriginDescription({
+        companyId: input.projectChannel.companyId,
         text: task.description ?? task.sourceText,
         slackUserId: input.event.user ?? null,
         channelId: input.projectChannel.channelId ?? "",
+        channelName: input.projectChannel.channelName,
         threadTs,
       }),
     });
@@ -1335,10 +2739,18 @@ export function slackIntegrationService(db: Db) {
 
     const comment = await issuesSvc.addComment(
       issue.id,
-      buildSlackCommentBody({
+      await buildSlackCommentBody({
+        companyId: issue.companyId,
         text,
         slackUserId: input.event.user ?? null,
         channelId: input.link.channelId,
+        channelName: input.link.projectSlackChannelId
+          ? await db
+              .select({ channelName: projectSlackChannels.channelName })
+              .from(projectSlackChannels)
+              .where(eq(projectSlackChannels.id, input.link.projectSlackChannelId))
+              .then((rows) => rows[0]?.channelName ?? null)
+          : null,
         threadTs: input.link.threadTs,
       }),
       {},
@@ -1420,36 +2832,127 @@ export function slackIntegrationService(db: Db) {
     if (!threadTs) return;
 
     const isThreadReply = Boolean(envelope.event.thread_ts && envelope.event.thread_ts !== envelope.event.ts);
-    if (!isThreadReply) {
-      const created = await createIssueFromSlackMessage({
+    const normalizedText = collapseWhitespace(stripLeadingSlackMentions(envelope.event.text ?? ""));
+    if (!normalizedText) return;
+
+    const threadLink = isThreadReply
+      ? await getThreadLinkBySlackThread(channelId, threadTs)
+      : null;
+
+    const actionRun = await createSlackActionRun({
+      companyId: projectChannel.companyId,
+      projectId: projectChannel.projectId,
+      issueId: threadLink?.issueId ?? null,
+      eventId: envelope.event_id,
+      channelId,
+      threadTs,
+      messageTs: readNonEmptyString(envelope.event.ts) ?? threadTs,
+      slackUserId: readNonEmptyString(envelope.event.user),
+      slackUserName: null,
+      requestText: envelope.event.text ?? "",
+      normalizedText,
+    });
+
+    const processingStatus = createControlThreadStatusController({
+      channelId,
+      threadTs,
+    });
+
+    try {
+      await processingStatus.start("Gathering information...");
+      const interpreterInput = await buildInterpreterInput({
         projectChannel,
+        threadLink,
         event: envelope.event,
+        normalizedText,
+        threadTs,
+        isThreadReply,
+      });
+      await processingStatus.update("Thinking...");
+      const interpretation = await interpreter.interpret(interpreterInput.payload);
+      await processingStatus.update(
+        interpretation.actionType === "query" ||
+          interpretation.actionType === "clarify" ||
+          interpretation.actionType === "noop"
+          ? "Preparing response..."
+          : "Updating the board...",
+      );
+      const outcome = await executeSlackAction({
+        projectChannel,
+        threadLink,
+        threadTs,
+        eventId: envelope.event_id,
+        event: envelope.event,
+        interpretation,
+        messageContext: interpreterInput.messageContext,
+        mappedAgents: interpreterInput.mappedAgents,
+        mappedProjects: interpreterInput.mappedProjects,
+        candidateAgents: interpreterInput.payload.candidateAgents,
+        candidateProjects: interpreterInput.payload.candidateProjects,
+        candidateIssues: interpreterInput.payload.candidateIssues,
       });
 
-      const eventText = readNonEmptyString(envelope.event.text);
-      if (!created && eventText && /^task:/i.test(stripLeadingSlackMentions(eventText))) {
-        const controlClient = await getControlClient();
-        if (controlClient) {
-          try {
-            await controlClient.postMessage({
-              channel: channelId,
-              threadTs,
-              text: "Use `task: <title>` to create a OrchestorAI issue in this project channel.",
-            });
-          } catch (error) {
-            logger.warn({ err: error, channelId }, "failed to post Slack task usage hint");
-          }
-        }
+      let replyText = outcome.slackReply ?? interpretation.slackReply;
+      if (
+        outcome.canonicalLink &&
+        !isSameSlackThread(outcome.canonicalLink, { channelId, threadTs })
+      ) {
+        replyText = [
+          replyText,
+          `Canonical issue thread: ${buildSlackThreadPointer(outcome.canonicalLink)}.`,
+        ]
+          .filter((line): line is string => Boolean(line))
+          .join("\n");
       }
-      return;
-    }
 
-    const link = await getThreadLinkBySlackThread(channelId, threadTs);
-    if (!link) return;
-    await addSlackReplyToIssue({
-      link,
-      event: envelope.event,
-    });
+      if (replyText) {
+        await processingStatus.update("Posting update...");
+        await postControlThreadReply({
+          channelId,
+          threadTs,
+          text: replyText,
+        });
+      }
+
+      if (
+        outcome.status === "executed" &&
+        outcome.canonicalLink &&
+        !isSameSlackThread(outcome.canonicalLink, { channelId, threadTs })
+      ) {
+        await postControlThreadReply({
+          channelId: outcome.canonicalLink.channelId,
+          threadTs: outcome.canonicalLink.threadTs,
+          text: [
+            "Slack control action applied from another thread.",
+            interpretation.slackReply,
+          ].join("\n"),
+        });
+      }
+
+      if (actionRun) {
+        await updateSlackActionRun(actionRun.id, {
+          projectId: outcome.issue?.projectId ?? projectChannel.projectId,
+          issueId: outcome.issue?.id ?? threadLink?.issueId ?? null,
+          status: outcome.status,
+          actionType: interpretation.actionType,
+          confidence: interpretation.confidence,
+          interpreterResult: interpretation,
+          executionResult: outcome.executionResult,
+        });
+      }
+    } catch (error) {
+      if (actionRun) {
+        await updateSlackActionRun(actionRun.id, {
+          projectId: projectChannel.projectId,
+          issueId: threadLink?.issueId ?? null,
+          status: "failed",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      throw error;
+    } finally {
+      await processingStatus.stop();
+    }
   }
 
   async function markMembershipPending(

@@ -50,7 +50,7 @@ export class OrchestorAIClient {
     return `${this.apiUrl}${pathname}`;
   }
 
-  async requestJson(method, pathname, body) {
+  async requestJson(method, pathname, body, options = {}) {
     if (typeof this.fetchImpl !== "function") {
       throw new Error("fetch is not available in this runtime");
     }
@@ -59,6 +59,7 @@ export class OrchestorAIClient {
       method,
       headers: {
         Accept: "application/json",
+        ...(options.headers || {}),
         ...(body ? { "Content-Type": "application/json" } : {}),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
@@ -111,6 +112,24 @@ export class OrchestorAIClient {
       value: Array.isArray(projects) ? projects : [],
     };
     return this.projectCache.value;
+  }
+
+  async getManagedProjectChannel(channelId, options = {}) {
+    const normalizedChannelId = String(channelId || "").trim();
+    if (!normalizedChannelId) {
+      return null;
+    }
+
+    const projects = await this.listProjects(options);
+    return (
+      projects.find((project) => {
+        const slackChannel = project?.slackChannel;
+        return (
+          String(slackChannel?.channelId || "").trim() === normalizedChannelId &&
+          String(slackChannel?.status || "").trim().toLowerCase() === "active"
+        );
+      }) || null
+    );
   }
 
   buildIssueQuery(options = {}) {
@@ -180,6 +199,20 @@ export class OrchestorAIClient {
   async getRunIssues(runId) {
     const issues = await this.requestJson("GET", `/api/heartbeat-runs/${runId}/issues`);
     return Array.isArray(issues) ? issues : [];
+  }
+
+  async forwardSlackControlEvent(payload, options = {}) {
+    const botToken = String(options.botToken || "").trim();
+    if (!botToken) {
+      throw new Error("botToken is required to forward Slack control events");
+    }
+
+    return await this.requestJson("POST", "/api/slack/control/events", payload, {
+      headers: {
+        authorization: `Bearer ${botToken}`,
+        "x-orchestorai-slack-source": "slack-bot",
+      },
+    });
   }
 
   subscribeLiveEvents(handlers = {}) {

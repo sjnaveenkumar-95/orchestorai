@@ -88,4 +88,37 @@ describe("claude_local environment diagnostics", () => {
     expect(stats.isDirectory()).toBe(true);
     await fs.rm(path.dirname(cwd), { recursive: true, force: true });
   });
+
+  it("rewrites legacy .paperclip cwd paths to the current .orchestorai home", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "orchestorai-claude-legacy-home-"));
+    const orchestoraiHome = path.join(root, ".orchestorai");
+    const legacyHome = path.join(root, ".paperclip");
+    const cwd = path.join(orchestoraiHome, "instances", "default", "agents", "claude-workspace");
+    const legacyCwd = path.join(legacyHome, "instances", "default", "agents", "claude-workspace");
+    const previousOrchestoraiHome = process.env.ORCHESTORAI_HOME;
+    process.env.ORCHESTORAI_HOME = orchestoraiHome;
+
+    try {
+      const result = await testEnvironment({
+        companyId: "company-1",
+        adapterType: "claude_local",
+        config: {
+          command: process.execPath,
+          cwd: legacyCwd,
+        },
+      });
+
+      expect(result.checks.some((check) => check.code === "claude_cwd_valid")).toBe(true);
+      expect(result.checks.some((check) => check.level === "error")).toBe(false);
+      expect((await fs.stat(cwd)).isDirectory()).toBe(true);
+      await expect(fs.stat(legacyHome)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      if (previousOrchestoraiHome === undefined) {
+        delete process.env.ORCHESTORAI_HOME;
+      } else {
+        process.env.ORCHESTORAI_HOME = previousOrchestoraiHome;
+      }
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
 });

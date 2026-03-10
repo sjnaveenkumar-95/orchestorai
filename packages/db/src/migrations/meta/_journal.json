@@ -218,6 +218,13 @@
       "when": 1773017477054,
       "tag": "0030_workable_ikaris",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1773117351243,
+      "tag": "0031_natural_whizzer",
+      "breakpoints": true
     }
   ]
 }

@@ -4,6 +4,8 @@ export { assetService } from "./assets.js";
 export { projectService } from "./projects.js";
 export { slackIntegrationService } from "./slack-integrations.js";
 export { issueService, type IssueFilters } from "./issues.js";
+export { issueCommandService, type IssueCommandActor, type IssueCommandMetadata } from "./issue-commands.js";
+export { slackActionInterpreterService, type SlackActionInterpreterInput } from "./slack-action-interpreter.js";
 export { issueApprovalService } from "./issue-approvals.js";
 export { goalService } from "./goals.js";
 export { activityService, type ActivityFilters } from "./activity.js";

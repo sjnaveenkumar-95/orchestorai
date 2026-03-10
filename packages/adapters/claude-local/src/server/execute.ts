@@ -16,6 +16,8 @@ import {
   ensureAbsoluteDirectory,
   ensureCommandResolvable,
   ensurePathInEnv,
+  normalizeLegacyLocalAdapterConfig,
+  normalizeLegacyLocalAdapterSessionParams,
   renderTemplate,
   runChildProcess,
 } from "@orchestorai/adapter-utils/server-utils";
@@ -109,7 +111,8 @@ function resolveClaudeBillingType(env: Record<string, string>): "api" | "subscri
 }
 
 async function buildClaudeRuntimeConfig(input: ClaudeExecutionInput): Promise<ClaudeRuntimeConfig> {
-  const { runId, agent, config, context, authToken } = input;
+  const { runId, agent, context, authToken } = input;
+  const config = normalizeLegacyLocalAdapterConfig(input.config);
 
   const command = asString(config.command, "claude");
   const workspaceContext = parseObject(context.orchestoraiWorkspace);
@@ -267,17 +270,21 @@ export async function runClaudeLogin(input: {
 
 export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
   const { runId, agent, runtime, config, context, onLog, onMeta, authToken } = ctx;
+  const normalizedConfig = normalizeLegacyLocalAdapterConfig(config);
 
   const promptTemplate = asString(
-    config.promptTemplate,
+    normalizedConfig.promptTemplate,
     "You are agent {{agent.id}} ({{agent.name}}). Continue your OrchestorAI work.",
   );
-  const model = asString(config.model, "");
-  const effort = asString(config.effort, "");
-  const chrome = asBoolean(config.chrome, false);
-  const maxTurns = asNumber(config.maxTurnsPerRun, 0);
-  const dangerouslySkipPermissions = asBoolean(config.dangerouslySkipPermissions, false);
-  const instructionsFilePath = asString(config.instructionsFilePath, "").trim();
+  const model = asString(normalizedConfig.model, "");
+  const effort = asString(normalizedConfig.effort, "");
+  const chrome = asBoolean(normalizedConfig.chrome, false);
+  const maxTurns = asNumber(normalizedConfig.maxTurnsPerRun, 0);
+  const dangerouslySkipPermissions = asBoolean(
+    normalizedConfig.dangerouslySkipPermissions,
+    false,
+  );
+  const instructionsFilePath = asString(normalizedConfig.instructionsFilePath, "").trim();
   const instructionsFileDir = instructionsFilePath ? `${path.dirname(instructionsFilePath)}/` : "";
   const commandNotes = instructionsFilePath
     ? [
@@ -288,7 +295,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const runtimeConfig = await buildClaudeRuntimeConfig({
     runId,
     agent,
-    config,
+    config: normalizedConfig,
     context,
     authToken,
   });
@@ -318,7 +325,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     effectiveInstructionsFilePath = combinedPath;
   }
 
-  const runtimeSessionParams = parseObject(runtime.sessionParams);
+  const runtimeSessionParams =
+    normalizeLegacyLocalAdapterSessionParams(parseObject(runtime.sessionParams)) ?? {};
   const runtimeSessionId = asString(runtimeSessionParams.sessionId, runtime.sessionId ?? "");
   const runtimeSessionCwd = asString(runtimeSessionParams.cwd, "");
   const canResumeSession =

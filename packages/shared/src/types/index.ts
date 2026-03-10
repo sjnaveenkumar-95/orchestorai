@@ -26,6 +26,12 @@ export type {
   SlackThreadLink,
 } from "./slack.js";
 export type {
+  SlackControlActionType,
+  SlackControlInterpreterMutation,
+  SlackControlInterpreterResult,
+  SlackControlMessageContext,
+} from "./slack-control.js";
+export type {
   Issue,
   IssueAssigneeAdapterOverrides,
   IssueComment,

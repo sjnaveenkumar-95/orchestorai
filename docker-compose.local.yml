@@ -10,7 +10,7 @@ services:
       - -c
       - hba_file=/etc/postgresql/pg_hba.conf
     volumes:
-      - ${ORCHESTORAI_DATA_DIR}/instances/default/db:/var/lib/postgresql/data
+      - ${ORCHESTORAI_DATA_DIR}/docker/postgres/${ORCHESTORAI_INSTANCE_ID:-default}:/var/lib/postgresql/data
       - ${ORCHESTORAI_DATA_DIR}/docker/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
 
   orchestorai:
@@ -19,21 +19,22 @@ services:
       - .env
     environment:
       HOME: "${ORCHESTORAI_RUNTIME_HOME}"
-      TMPDIR: "/tmp"
+      TMPDIR: "${ORCHESTORAI_RUNTIME_HOME}/.tmp"
       XDG_CACHE_HOME: "${ORCHESTORAI_RUNTIME_HOME}/.cache"
       COREPACK_HOME: "${ORCHESTORAI_RUNTIME_HOME}/.cache/node/corepack"
       HOST: "127.0.0.1"
       PORT: "3101"
+      DATABASE_URL: "${ORCHESTORAI_DATABASE_URL-postgres://orchestorai:orchestorai@db:5432/orchestorai}"
       ORCHESTORAI_HOME: "${ORCHESTORAI_RUNTIME_HOME}"
       ORCHESTORAI_DATA_DIR: "${ORCHESTORAI_RUNTIME_HOME}"
-      ORCHESTORAI_CONFIG: "${ORCHESTORAI_RUNTIME_HOME}/instances/default/config.json"
-      ORCHESTORAI_LOG_DIR: "${ORCHESTORAI_RUNTIME_HOME}/instances/default/logs"
+      ORCHESTORAI_CONFIG: "${ORCHESTORAI_RUNTIME_HOME}/instances/${ORCHESTORAI_INSTANCE_ID:-default}/config.json"
+      ORCHESTORAI_LOG_DIR: "${ORCHESTORAI_RUNTIME_HOME}/instances/${ORCHESTORAI_INSTANCE_ID:-default}/logs"
       ORCHESTORAI_API_URL: "http://127.0.0.1:3101"
       CODEX_HOME: "/workspace/project/.codex"
       CODEX_WORKDIR: "${CODEX_WORKDIR:-/workspace/project}"
       CODEX_ADDITIONAL_WRITABLE_DIRS: "${CODEX_ADDITIONAL_WRITABLE_DIRS}"
       DATA_DIR: "${ORCHESTORAI_RUNTIME_HOME}/slack-bot/data"
-      RUN_LOG_BASE_PATH: "${ORCHESTORAI_RUNTIME_HOME}/instances/default/data/run-logs"
+      RUN_LOG_BASE_PATH: "${ORCHESTORAI_RUNTIME_HOME}/instances/${ORCHESTORAI_INSTANCE_ID:-default}/data/run-logs"
       ORCHESTORAI_TASK_PREFIX: "${ORCHESTORAI_TASK_PREFIX:-task:}"
       ORCHESTORAI_SYNC_REPLIES: "${ORCHESTORAI_SYNC_REPLIES:-mention_only}"
       ORCHESTORAI_NOTIFICATION_MODE: "${ORCHESTORAI_NOTIFICATION_MODE:-high_signal}"
@@ -41,6 +42,20 @@ services:
       - sh
       - -lc
       - |
+        if ! getent passwd "$(id -u)" >/dev/null 2>&1; then
+          export NSS_WRAPPER_PASSWD=/tmp/orchestorai-passwd
+          export NSS_WRAPPER_GROUP=/tmp/orchestorai-group
+          cp /etc/passwd "$$NSS_WRAPPER_PASSWD"
+          cp /etc/group "$$NSS_WRAPPER_GROUP"
+          echo "orchestorai-local:x:$(id -u):$(id -g):OrchestorAI Local:${HOME}:/bin/sh" >> "$$NSS_WRAPPER_PASSWD"
+          if ! getent group "$(id -g)" >/dev/null 2>&1; then
+            echo "orchestorai-local:x:$(id -g):" >> "$$NSS_WRAPPER_GROUP"
+          fi
+          NSS_WRAPPER_LIB="$(find /usr/lib -name libnss_wrapper.so | head -n 1)"
+          if [ -n "$$NSS_WRAPPER_LIB" ]; then
+            export LD_PRELOAD="$$NSS_WRAPPER_LIB$${LD_PRELOAD:+:$$LD_PRELOAD}"
+          fi
+        fi
         node -e "const net=require('node:net'); net.createServer((client)=>{const upstream=net.connect(3101,'127.0.0.1'); client.pipe(upstream); upstream.pipe(client); const close=()=>{client.destroy(); upstream.destroy();}; client.on('error', close); upstream.on('error', close);}).listen(3100,'0.0.0.0');" &
         exec node scripts/run-stack.mjs production
     volumes:

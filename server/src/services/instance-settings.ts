@@ -15,7 +15,17 @@ type RuntimeSecretField =
   | "slackSigningSecret"
   | "betterAuthSecret";
 
-type RuntimeValueField = "authPublicBaseUrl" | "slackDefaultChannelMemberIds";
+type RuntimeValueField =
+  | "authPublicBaseUrl"
+  | "slackDefaultChannelMemberIds"
+  | "slackInterpreterEnabled"
+  | "slackInterpreterModel"
+  | "slackInterpreterProfile"
+  | "slackInterpreterWorkdir"
+  | "slackInterpreterTimeoutSec"
+  | "slackInterpreterContextLimit"
+  | "slackAgentMappingsJson"
+  | "slackProjectMappingsJson";
 
 const RUNTIME_SECRET_KEYS: Record<RuntimeSecretField, string> = {
   slackBotToken: "SLACK_BOT_TOKEN",
@@ -28,6 +38,14 @@ const RUNTIME_SECRET_KEYS: Record<RuntimeSecretField, string> = {
 const RUNTIME_VALUE_KEYS: Record<RuntimeValueField, string> = {
   authPublicBaseUrl: "ORCHESTORAI_AUTH_PUBLIC_BASE_URL",
   slackDefaultChannelMemberIds: "SLACK_DEFAULT_CHANNEL_MEMBER_IDS",
+  slackInterpreterEnabled: "SLACK_INTERPRETER_ENABLED",
+  slackInterpreterModel: "SLACK_INTERPRETER_MODEL",
+  slackInterpreterProfile: "SLACK_INTERPRETER_PROFILE",
+  slackInterpreterWorkdir: "SLACK_INTERPRETER_WORKDIR",
+  slackInterpreterTimeoutSec: "SLACK_INTERPRETER_TIMEOUT_SEC",
+  slackInterpreterContextLimit: "SLACK_INTERPRETER_CONTEXT_LIMIT",
+  slackAgentMappingsJson: "SLACK_AGENT_MAPPINGS_JSON",
+  slackProjectMappingsJson: "SLACK_PROJECT_MAPPINGS_JSON",
 };
 
 const AUTH_PUBLIC_BASE_URL_ENV_KEY = RUNTIME_VALUE_KEYS.authPublicBaseUrl;
@@ -230,6 +248,38 @@ export function createInstanceSettingsService(options: { envFilePath?: string } 
         envEntries,
         SLACK_DEFAULT_CHANNEL_MEMBER_IDS_ENV_KEY,
       ),
+      slackInterpreterEnabled: resolveSimpleValueStatus(
+        envEntries,
+        RUNTIME_VALUE_KEYS.slackInterpreterEnabled,
+      ),
+      slackInterpreterModel: resolveSimpleValueStatus(
+        envEntries,
+        RUNTIME_VALUE_KEYS.slackInterpreterModel,
+      ),
+      slackInterpreterProfile: resolveSimpleValueStatus(
+        envEntries,
+        RUNTIME_VALUE_KEYS.slackInterpreterProfile,
+      ),
+      slackInterpreterWorkdir: resolveSimpleValueStatus(
+        envEntries,
+        RUNTIME_VALUE_KEYS.slackInterpreterWorkdir,
+      ),
+      slackInterpreterTimeoutSec: resolveSimpleValueStatus(
+        envEntries,
+        RUNTIME_VALUE_KEYS.slackInterpreterTimeoutSec,
+      ),
+      slackInterpreterContextLimit: resolveSimpleValueStatus(
+        envEntries,
+        RUNTIME_VALUE_KEYS.slackInterpreterContextLimit,
+      ),
+      slackAgentMappingsJson: resolveSimpleValueStatus(
+        envEntries,
+        RUNTIME_VALUE_KEYS.slackAgentMappingsJson,
+      ),
+      slackProjectMappingsJson: resolveSimpleValueStatus(
+        envEntries,
+        RUNTIME_VALUE_KEYS.slackProjectMappingsJson,
+      ),
       secrets: {
         slackBotToken: resolveSecretStatus(envEntries, "slackBotToken"),
         slackAppToken: resolveSecretStatus(envEntries, "slackAppToken"),
@@ -249,6 +299,31 @@ export function createInstanceSettingsService(options: { envFilePath?: string } 
 
     if (isNonEmpty(input.slackDefaultChannelMemberIds)) {
       nextEntries[SLACK_DEFAULT_CHANNEL_MEMBER_IDS_ENV_KEY] = input.slackDefaultChannelMemberIds.trim();
+    }
+
+    if (typeof input.slackInterpreterEnabled === "boolean") {
+      nextEntries[RUNTIME_VALUE_KEYS.slackInterpreterEnabled] = input.slackInterpreterEnabled ? "true" : "false";
+    }
+    if (isNonEmpty(input.slackInterpreterModel)) {
+      nextEntries[RUNTIME_VALUE_KEYS.slackInterpreterModel] = input.slackInterpreterModel.trim();
+    }
+    if (isNonEmpty(input.slackInterpreterProfile)) {
+      nextEntries[RUNTIME_VALUE_KEYS.slackInterpreterProfile] = input.slackInterpreterProfile.trim();
+    }
+    if (isNonEmpty(input.slackInterpreterWorkdir)) {
+      nextEntries[RUNTIME_VALUE_KEYS.slackInterpreterWorkdir] = input.slackInterpreterWorkdir.trim();
+    }
+    if (typeof input.slackInterpreterTimeoutSec === "number") {
+      nextEntries[RUNTIME_VALUE_KEYS.slackInterpreterTimeoutSec] = String(input.slackInterpreterTimeoutSec);
+    }
+    if (typeof input.slackInterpreterContextLimit === "number") {
+      nextEntries[RUNTIME_VALUE_KEYS.slackInterpreterContextLimit] = String(input.slackInterpreterContextLimit);
+    }
+    if (isNonEmpty(input.slackAgentMappingsJson)) {
+      nextEntries[RUNTIME_VALUE_KEYS.slackAgentMappingsJson] = input.slackAgentMappingsJson.trim();
+    }
+    if (isNonEmpty(input.slackProjectMappingsJson)) {
+      nextEntries[RUNTIME_VALUE_KEYS.slackProjectMappingsJson] = input.slackProjectMappingsJson.trim();
     }
 
     for (const [field, envKey] of Object.entries(RUNTIME_SECRET_KEYS) as [RuntimeSecretField, string][]) {

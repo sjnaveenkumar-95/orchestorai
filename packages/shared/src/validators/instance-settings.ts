@@ -7,6 +7,14 @@ export const updateInstanceRuntimeSettingsSchema = z
   .object({
     authPublicBaseUrl: z.string().trim().url().max(2048).optional(),
     slackDefaultChannelMemberIds: runtimeValueSchema.optional(),
+    slackInterpreterEnabled: z.boolean().optional(),
+    slackInterpreterModel: runtimeValueSchema.optional(),
+    slackInterpreterProfile: runtimeValueSchema.optional(),
+    slackInterpreterWorkdir: runtimeValueSchema.optional(),
+    slackInterpreterTimeoutSec: z.number().int().positive().max(86400).optional(),
+    slackInterpreterContextLimit: z.number().int().positive().max(200).optional(),
+    slackAgentMappingsJson: runtimeValueSchema.optional(),
+    slackProjectMappingsJson: runtimeValueSchema.optional(),
     slackBotToken: runtimeSecretValueSchema.optional(),
     slackAppToken: runtimeSecretValueSchema.optional(),
     slackManifestToken: runtimeSecretValueSchema.optional(),
@@ -18,6 +26,14 @@ export const updateInstanceRuntimeSettingsSchema = z
       Boolean(
         value.authPublicBaseUrl ||
         value.slackDefaultChannelMemberIds ||
+        value.slackInterpreterEnabled !== undefined ||
+        value.slackInterpreterModel ||
+        value.slackInterpreterProfile ||
+        value.slackInterpreterWorkdir ||
+        value.slackInterpreterTimeoutSec !== undefined ||
+        value.slackInterpreterContextLimit !== undefined ||
+        value.slackAgentMappingsJson ||
+        value.slackProjectMappingsJson ||
         value.slackBotToken ||
         value.slackAppToken ||
         value.slackManifestToken ||

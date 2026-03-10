@@ -131,6 +131,94 @@ export function ensurePathInEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return { ...env, PATH: defaultPathForPlatform() };
 }
 
+function trimTrailingPathSeparators(value: string): string {
+  let normalized = path.normalize(value);
+  const root = path.parse(normalized).root;
+  while (normalized.length > root.length && normalized.endsWith(path.sep)) {
+    normalized = normalized.slice(0, -1);
+  }
+  return normalized;
+}
+
+function resolveLegacyHomeMapping(): { legacyHome: string; currentHome: string } | null {
+  const currentHomeCandidate =
+    (typeof process.env.ORCHESTORAI_HOME === "string" && process.env.ORCHESTORAI_HOME.trim()) ||
+    (typeof process.env.ORCHESTORAI_DATA_DIR === "string" &&
+      process.env.ORCHESTORAI_DATA_DIR.trim()) ||
+    "";
+  if (!currentHomeCandidate || !path.isAbsolute(currentHomeCandidate)) {
+    return null;
+  }
+
+  const currentHome = trimTrailingPathSeparators(currentHomeCandidate);
+  const legacyHome = trimTrailingPathSeparators(
+    path.join(path.dirname(currentHome), ".paperclip"),
+  );
+  if (legacyHome === currentHome) return null;
+
+  return { legacyHome, currentHome };
+}
+
+export function rewriteLegacyOrchestorAIHomePath(value: string): string {
+  if (!value || !path.isAbsolute(value)) return value;
+
+  const mapping = resolveLegacyHomeMapping();
+  if (!mapping) return value;
+
+  const normalizedValue = trimTrailingPathSeparators(value);
+  if (normalizedValue === mapping.legacyHome) {
+    return mapping.currentHome;
+  }
+  if (!normalizedValue.startsWith(`${mapping.legacyHome}${path.sep}`)) {
+    return value;
+  }
+
+  return path.join(mapping.currentHome, normalizedValue.slice(mapping.legacyHome.length + 1));
+}
+
+export function normalizeLegacyLocalAdapterConfig(
+  config: Record<string, unknown>,
+): Record<string, unknown> {
+  const normalized = { ...config };
+
+  if (typeof normalized.cwd === "string") {
+    normalized.cwd = rewriteLegacyOrchestorAIHomePath(normalized.cwd);
+  }
+  if (typeof normalized.instructionsFilePath === "string") {
+    normalized.instructionsFilePath = rewriteLegacyOrchestorAIHomePath(
+      normalized.instructionsFilePath,
+    );
+  }
+
+  const env = parseObject(normalized.env);
+  if (Object.keys(env).length > 0) {
+    const normalizedEnv: Record<string, unknown> = {};
+    for (const [key, rawValue] of Object.entries(env)) {
+      normalizedEnv[key] =
+        typeof rawValue === "string"
+          ? rewriteLegacyOrchestorAIHomePath(rawValue)
+          : rawValue;
+    }
+    normalized.env = normalizedEnv;
+  }
+
+  return normalized;
+}
+
+export function normalizeLegacyLocalAdapterSessionParams(
+  params: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!params) return null;
+
+  const normalized = { ...params };
+  for (const key of ["cwd", "workdir", "folder"] as const) {
+    if (typeof normalized[key] === "string") {
+      normalized[key] = rewriteLegacyOrchestorAIHomePath(normalized[key] as string);
+    }
+  }
+  return normalized;
+}
+
 export async function ensureAbsoluteDirectory(
   cwd: string,
   opts: { createIfMissing?: boolean } = {},

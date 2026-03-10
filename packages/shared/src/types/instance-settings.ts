@@ -20,6 +20,14 @@ export interface InstanceRuntimeSettings {
   restartRequired: boolean;
   authPublicBaseUrl: InstanceRuntimeValueStatus;
   slackDefaultChannelMemberIds: InstanceRuntimeValueStatus;
+  slackInterpreterEnabled: InstanceRuntimeValueStatus;
+  slackInterpreterModel: InstanceRuntimeValueStatus;
+  slackInterpreterProfile: InstanceRuntimeValueStatus;
+  slackInterpreterWorkdir: InstanceRuntimeValueStatus;
+  slackInterpreterTimeoutSec: InstanceRuntimeValueStatus;
+  slackInterpreterContextLimit: InstanceRuntimeValueStatus;
+  slackAgentMappingsJson: InstanceRuntimeValueStatus;
+  slackProjectMappingsJson: InstanceRuntimeValueStatus;
   secrets: {
     slackBotToken: InstanceRuntimeSecretStatus;
     slackAppToken: InstanceRuntimeSecretStatus;

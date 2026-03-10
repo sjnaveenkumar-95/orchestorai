@@ -1,8 +1,12 @@
 FROM node:lts-trixie-slim AS base
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl git ripgrep \
+  && apt-get install -y --no-install-recommends ca-certificates curl git libnss-wrapper locales ripgrep \
+  && sed -i '/^# *en_US.UTF-8 UTF-8/s/^# *//' /etc/locale.gen \
+  && locale-gen en_US.UTF-8 \
   && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
+ENV LANG=en_US.UTF-8 \
+  LC_ALL=en_US.UTF-8
 
 FROM base AS deps
 WORKDIR /app

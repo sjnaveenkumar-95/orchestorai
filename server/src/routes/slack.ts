@@ -35,6 +35,33 @@ function verifySlackSignature(input: {
   return safeCompare(digest, input.signatureHeader ?? "");
 }
 
+function verifyInternalSlackBotRequest(input: {
+  expectedBotToken?: string | null;
+  authorizationHeader?: string;
+  sourceHeader?: string;
+}) {
+  if (input.sourceHeader !== "slack-bot") {
+    return false;
+  }
+
+  const expectedBotToken = input.expectedBotToken?.trim();
+  if (!expectedBotToken) {
+    return false;
+  }
+
+  const authorizationHeader = input.authorizationHeader?.trim();
+  if (!authorizationHeader?.toLowerCase().startsWith("bearer ")) {
+    return false;
+  }
+
+  const providedToken = authorizationHeader.slice("bearer ".length).trim();
+  if (!providedToken) {
+    return false;
+  }
+
+  return safeCompare(expectedBotToken, providedToken);
+}
+
 export function slackRoutes(db: Db) {
   const router = Router();
   const slackSvc = slackIntegrationService(db);
@@ -75,12 +102,6 @@ export function slackRoutes(db: Db) {
   });
 
   router.post("/slack/control/events", async (req, res) => {
-    const signingSecret = instanceSettings.getRuntimeSecretValue("slackSigningSecret");
-    if (!signingSecret) {
-      res.status(503).json({ error: "Slack signing secret is not configured" });
-      return;
-    }
-
     const rawBody =
       Buffer.isBuffer(req.body)
         ? req.body.toString("utf8")
@@ -88,16 +109,30 @@ export function slackRoutes(db: Db) {
           ? req.body
           : "";
 
-    const isValid = verifySlackSignature({
-      signingSecret,
-      rawBody,
-      timestampHeader: req.header("x-slack-request-timestamp") ?? undefined,
-      signatureHeader: req.header("x-slack-signature") ?? undefined,
+    const isInternalSlackBotRequest = verifyInternalSlackBotRequest({
+      expectedBotToken: instanceSettings.getRuntimeSecretValue("slackBotToken"),
+      authorizationHeader: req.header("authorization") ?? undefined,
+      sourceHeader: req.header("x-orchestorai-slack-source") ?? undefined,
     });
 
-    if (!isValid) {
-      res.status(401).json({ error: "Invalid Slack signature" });
-      return;
+    if (!isInternalSlackBotRequest) {
+      const signingSecret = instanceSettings.getRuntimeSecretValue("slackSigningSecret");
+      if (!signingSecret) {
+        res.status(503).json({ error: "Slack signing secret is not configured" });
+        return;
+      }
+
+      const isValid = verifySlackSignature({
+        signingSecret,
+        rawBody,
+        timestampHeader: req.header("x-slack-request-timestamp") ?? undefined,
+        signatureHeader: req.header("x-slack-signature") ?? undefined,
+      });
+
+      if (!isValid) {
+        res.status(401).json({ error: "Invalid Slack signature" });
+        return;
+      }
     }
 
     let payload: Record<string, unknown>;
