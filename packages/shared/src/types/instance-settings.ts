@@ -28,6 +28,7 @@ export interface InstanceRuntimeSettings {
   slackInterpreterContextLimit: InstanceRuntimeValueStatus;
   slackAgentMappingsJson: InstanceRuntimeValueStatus;
   slackProjectMappingsJson: InstanceRuntimeValueStatus;
+  slackBoardApproverUserIds: InstanceRuntimeValueStatus;
   secrets: {
     slackBotToken: InstanceRuntimeSecretStatus;
     slackAppToken: InstanceRuntimeSecretStatus;

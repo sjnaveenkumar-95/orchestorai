@@ -12,6 +12,7 @@ import { logger } from "../middleware/logger.js";
 import {
   approvalService,
   heartbeatService,
+  hostCommandFallbackService,
   issueApprovalService,
   logActivity,
   secretService,
@@ -32,6 +33,7 @@ export function approvalRoutes(db: Db) {
   const svc = approvalService(db);
   const heartbeat = heartbeatService(db);
   const issueApprovalsSvc = issueApprovalService(db);
+  const hostCommandSvc = hostCommandFallbackService(db);
   const secretsSvc = secretService(db);
   const slackSvc = slackIntegrationService(db);
   const strictSecretsMode = process.env.ORCHESTORAI_SECRETS_STRICT_MODE === "true";
@@ -64,6 +66,10 @@ export function approvalRoutes(db: Db) {
       : [];
     const uniqueIssueIds = Array.from(new Set(issueIds));
     const { issueIds: _issueIds, ...approvalInput } = req.body;
+    if (approvalInput.type === "host_command_fallback") {
+      res.status(422).json({ error: "Use /api/companies/:companyId/host-command-fallbacks" });
+      return;
+    }
     const normalizedPayload =
       approvalInput.type === "hire_agent"
         ? await secretsSvc.normalizeHireApprovalPayloadForPersistence(
@@ -123,6 +129,14 @@ export function approvalRoutes(db: Db) {
   router.post("/approvals/:id/approve", validate(resolveApprovalSchema), async (req, res) => {
     assertBoard(req);
     const id = req.params.id as string;
+    const existing = await svc.getById(id);
+    if (!existing) {
+      res.status(404).json({ error: "Approval not found" });
+      return;
+    }
+    if (existing.type === "host_command_fallback") {
+      await hostCommandSvc.assertCanApprove(id, req.body.resolutionMode ?? "once");
+    }
     const approval = await svc.approve(id, req.body.decidedByUserId ?? "board", req.body.decisionNote);
     const linkedIssues = await issueApprovalsSvc.listIssuesForApproval(approval.id);
     const linkedIssueIds = linkedIssues.map((issue) => issue.id);
@@ -141,6 +155,16 @@ export function approvalRoutes(db: Db) {
         linkedIssueIds,
       },
     });
+
+    if (approval.type === "host_command_fallback") {
+      await hostCommandSvc.handleApprovalApproved(
+        approval.id,
+        req.actor.userId ?? req.body.decidedByUserId ?? "board",
+        req.body.resolutionMode ?? "once",
+      );
+      res.json(redactApprovalPayload(approval));
+      return;
+    }
 
     if (approval.requestedByAgentId) {
       try {
@@ -234,7 +258,12 @@ export function approvalRoutes(db: Db) {
       entityId: approval.id,
       details: { type: approval.type },
     });
-
+    if (approval.type === "host_command_fallback") {
+      await hostCommandSvc.handleApprovalRejected(
+        approval.id,
+        req.actor.userId ?? req.body.decidedByUserId ?? "board",
+      );
+    }
     res.json(redactApprovalPayload(approval));
   });
 
@@ -244,6 +273,15 @@ export function approvalRoutes(db: Db) {
     async (req, res) => {
       assertBoard(req);
       const id = req.params.id as string;
+      const existing = await svc.getById(id);
+      if (!existing) {
+        res.status(404).json({ error: "Approval not found" });
+        return;
+      }
+      if (existing.type === "host_command_fallback") {
+        res.status(422).json({ error: "Host command fallback approvals do not support revision requests" });
+        return;
+      }
       const approval = await svc.requestRevision(
         id,
         req.body.decidedByUserId ?? "board",
@@ -275,6 +313,10 @@ export function approvalRoutes(db: Db) {
 
     if (req.actor.type === "agent" && req.actor.agentId !== existing.requestedByAgentId) {
       res.status(403).json({ error: "Only requesting agent can resubmit this approval" });
+      return;
+    }
+    if (existing.type === "host_command_fallback") {
+      res.status(422).json({ error: "Host command fallback approvals cannot be resubmitted" });
       return;
     }
 

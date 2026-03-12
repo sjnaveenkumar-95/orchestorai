@@ -7,6 +7,7 @@ export { issueService, type IssueFilters } from "./issues.js";
 export { issueCommandService, type IssueCommandActor, type IssueCommandMetadata } from "./issue-commands.js";
 export { slackActionInterpreterService, type SlackActionInterpreterInput } from "./slack-action-interpreter.js";
 export { issueApprovalService } from "./issue-approvals.js";
+export { hostCommandFallbackService } from "./host-command-fallbacks.js";
 export { goalService } from "./goals.js";
 export { activityService, type ActivityFilters } from "./activity.js";
 export { approvalService } from "./approvals.js";

@@ -40,7 +40,7 @@ import {
 import { Identity } from "../components/Identity";
 import { PageTabBar } from "../components/PageTabBar";
 import { useInboxDismissedItems } from "../lib/inbox-dismissals";
-import type { HeartbeatRun, Issue, JoinRequest } from "@orchestorai/shared";
+import type { ApprovalResolutionMode, HeartbeatRun, Issue, JoinRequest } from "@orchestorai/shared";
 
 const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
 const RECENT_ISSUES_LIMIT = 100;
@@ -419,11 +419,17 @@ export function Inbox() {
   };
 
   const approveMutation = useMutation({
-    mutationFn: (id: string) => approvalsApi.approve(id),
+    mutationFn: ({
+      id,
+      resolutionMode,
+    }: {
+      id: string;
+      resolutionMode?: ApprovalResolutionMode;
+    }) => approvalsApi.approve(id, undefined, resolutionMode),
     onSuccess: (_approval, id) => {
       setActionError(null);
       queryClient.invalidateQueries({ queryKey: queryKeys.approvals.list(selectedCompanyId!) });
-      navigate(`/approvals/${id}?resolved=approved`);
+      navigate(`/approvals/${id.id}?resolved=approved`);
     },
     onError: (err) => {
       setActionError(err instanceof Error ? err.message : "Failed to approve");
@@ -558,6 +564,60 @@ export function Inbox() {
 
   const showSeparatorBefore = (key: SectionKey) => visibleSections.indexOf(key) > 0;
 
+  function renderApprovalActions(approvalId: string, approvalType: string) {
+    if (approvalType === "host_command_fallback") {
+      return (
+        <>
+          <Button
+            size="sm"
+            className="bg-green-700 hover:bg-green-600 text-white"
+            onClick={() => approveMutation.mutate({ id: approvalId, resolutionMode: "once" })}
+            disabled={approveMutation.isPending || rejectMutation.isPending}
+          >
+            Approve Once
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => approveMutation.mutate({ id: approvalId, resolutionMode: "always" })}
+            disabled={approveMutation.isPending || rejectMutation.isPending}
+          >
+            Approve Always
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => rejectMutation.mutate(approvalId)}
+            disabled={approveMutation.isPending || rejectMutation.isPending}
+          >
+            Reject
+          </Button>
+        </>
+      );
+    }
+
+    return (
+      <>
+        <Button
+          size="sm"
+          className="bg-green-700 hover:bg-green-600 text-white"
+          onClick={() => approveMutation.mutate({ id: approvalId })}
+          disabled={approveMutation.isPending || rejectMutation.isPending}
+        >
+          Approve
+        </Button>
+        <Button
+          variant="destructive"
+          size="sm"
+          onClick={() => rejectMutation.mutate(approvalId)}
+          disabled={approveMutation.isPending || rejectMutation.isPending}
+        >
+          Reject
+        </Button>
+      </>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -656,8 +716,7 @@ export function Inbox() {
                       ? (agents ?? []).find((a) => a.id === approval.requestedByAgentId) ?? null
                       : null
                   }
-                  onApprove={() => approveMutation.mutate(approval.id)}
-                  onReject={() => rejectMutation.mutate(approval.id)}
+                  actions={renderApprovalActions(approval.id, approval.type)}
                   detailLink={`/approvals/${approval.id}`}
                   isPending={approveMutation.isPending || rejectMutation.isPending}
                 />

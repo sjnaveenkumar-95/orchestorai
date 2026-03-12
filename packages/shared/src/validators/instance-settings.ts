@@ -15,6 +15,7 @@ export const updateInstanceRuntimeSettingsSchema = z
     slackInterpreterContextLimit: z.number().int().positive().max(200).optional(),
     slackAgentMappingsJson: runtimeValueSchema.optional(),
     slackProjectMappingsJson: runtimeValueSchema.optional(),
+    slackBoardApproverUserIds: runtimeValueSchema.optional(),
     slackBotToken: runtimeSecretValueSchema.optional(),
     slackAppToken: runtimeSecretValueSchema.optional(),
     slackManifestToken: runtimeSecretValueSchema.optional(),
@@ -34,6 +35,7 @@ export const updateInstanceRuntimeSettingsSchema = z
         value.slackInterpreterContextLimit !== undefined ||
         value.slackAgentMappingsJson ||
         value.slackProjectMappingsJson ||
+        value.slackBoardApproverUserIds ||
         value.slackBotToken ||
         value.slackAppToken ||
         value.slackManifestToken ||

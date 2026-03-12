@@ -75,3 +75,15 @@ export interface SlackThreadLink {
   createdAt: Date;
   updatedAt: Date;
 }
+
+export interface SlackApprovalThreadLink {
+  id: string;
+  companyId: string;
+  approvalId: string;
+  projectId: string | null;
+  projectSlackChannelId: string | null;
+  channelId: string;
+  threadTs: string;
+  createdAt: Date;
+  updatedAt: Date;
+}

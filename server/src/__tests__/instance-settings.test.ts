@@ -10,6 +10,8 @@ const ORIGINAL_SLACK_MANIFEST_TOKEN = process.env.SLACK_APP_MANIFEST_TOKEN;
 const ORIGINAL_SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET;
 const ORIGINAL_ORCHESTORAI_AUTH_PUBLIC_BASE_URL = process.env.ORCHESTORAI_AUTH_PUBLIC_BASE_URL;
 const ORIGINAL_ORCHESTORAI_PUBLIC_URL = process.env.ORCHESTORAI_PUBLIC_URL;
+const ORIGINAL_SLACK_BOARD_APPROVER_USER_IDS = process.env.SLACK_BOARD_APPROVER_USER_IDS;
+const ORIGINAL_SLACK_DEFAULT_CHANNEL_MEMBER_IDS = process.env.SLACK_DEFAULT_CHANNEL_MEMBER_IDS;
 const ORIGINAL_ORCHESTORAI_CONFIG = process.env.ORCHESTORAI_CONFIG;
 const ORIGINAL_ORCHESTORAI_HOME = process.env.ORCHESTORAI_HOME;
 const ORIGINAL_ORCHESTORAI_INSTANCE_ID = process.env.ORCHESTORAI_INSTANCE_ID;
@@ -33,6 +35,12 @@ afterEach(() => {
 
   if (ORIGINAL_ORCHESTORAI_PUBLIC_URL === undefined) delete process.env.ORCHESTORAI_PUBLIC_URL;
   else process.env.ORCHESTORAI_PUBLIC_URL = ORIGINAL_ORCHESTORAI_PUBLIC_URL;
+
+  if (ORIGINAL_SLACK_BOARD_APPROVER_USER_IDS === undefined) delete process.env.SLACK_BOARD_APPROVER_USER_IDS;
+  else process.env.SLACK_BOARD_APPROVER_USER_IDS = ORIGINAL_SLACK_BOARD_APPROVER_USER_IDS;
+
+  if (ORIGINAL_SLACK_DEFAULT_CHANNEL_MEMBER_IDS === undefined) delete process.env.SLACK_DEFAULT_CHANNEL_MEMBER_IDS;
+  else process.env.SLACK_DEFAULT_CHANNEL_MEMBER_IDS = ORIGINAL_SLACK_DEFAULT_CHANNEL_MEMBER_IDS;
 
   if (ORIGINAL_ORCHESTORAI_CONFIG === undefined) delete process.env.ORCHESTORAI_CONFIG;
   else process.env.ORCHESTORAI_CONFIG = ORIGINAL_ORCHESTORAI_CONFIG;
@@ -59,6 +67,7 @@ describe("createInstanceSettingsService", () => {
         "SLACK_APP_MANIFEST_TOKEN=xoxe.xoxp-manifest-token",
         "SLACK_SIGNING_SECRET=signing-secret-value",
         "ORCHESTORAI_AUTH_PUBLIC_BASE_URL=https://orchestorai.example.com",
+        "SLACK_BOARD_APPROVER_USER_IDS=U12345,U67890",
         "BETTER_AUTH_SECRET=super-secret-value",
         "",
       ].join("\n"),
@@ -72,6 +81,9 @@ describe("createInstanceSettingsService", () => {
     expect(result.authPublicBaseUrl.configured).toBe(true);
     expect(result.authPublicBaseUrl.source).toBe("orchestorai_env");
     expect(result.authPublicBaseUrl.value).toBe("https://orchestorai.example.com");
+    expect(result.slackBoardApproverUserIds.configured).toBe(true);
+    expect(result.slackBoardApproverUserIds.source).toBe("orchestorai_env");
+    expect(result.slackBoardApproverUserIds.value).toBe("U12345,U67890");
     expect(result.secrets.slackBotToken.configured).toBe(true);
     expect(result.secrets.slackBotToken.source).toBe("orchestorai_env");
     expect(result.secrets.slackBotToken.maskedValue).toMatch(/^xoxb-\*+abcd$/);
@@ -90,6 +102,7 @@ describe("createInstanceSettingsService", () => {
     const envFilePath = path.join(tmpDir, ".env");
     process.env.SLACK_BOT_TOKEN = "xoxb-process-token";
     process.env.ORCHESTORAI_AUTH_PUBLIC_BASE_URL = "https://runtime.orchestorai.example.com";
+    process.env.SLACK_BOARD_APPROVER_USER_IDS = "U99999";
     process.env.ORCHESTORAI_CONFIG = path.join(tmpDir, "missing-config.json");
 
     const svc = createInstanceSettingsService({ envFilePath });
@@ -98,8 +111,31 @@ describe("createInstanceSettingsService", () => {
     expect(result.authPublicBaseUrl.configured).toBe(true);
     expect(result.authPublicBaseUrl.source).toBe("process_env");
     expect(result.authPublicBaseUrl.value).toBe("https://runtime.orchestorai.example.com");
+    expect(result.slackBoardApproverUserIds.configured).toBe(true);
+    expect(result.slackBoardApproverUserIds.source).toBe("process_env");
+    expect(result.slackBoardApproverUserIds.value).toBe("U99999");
     expect(result.secrets.slackBotToken.configured).toBe(true);
     expect(result.secrets.slackBotToken.source).toBe("process_env");
+  });
+
+  it("uses SLACK_DEFAULT_CHANNEL_MEMBER_IDS when board approver ids are unset", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "orchestorai-instance-settings-"));
+    const envFilePath = path.join(tmpDir, ".env");
+    fs.writeFileSync(envFilePath, "SLACK_DEFAULT_CHANNEL_MEMBER_IDS=UDEFAULT1,UDEFAULT2\n", "utf8");
+
+    delete process.env.SLACK_BOARD_APPROVER_USER_IDS;
+    delete process.env.SLACK_DEFAULT_CHANNEL_MEMBER_IDS;
+    process.env.ORCHESTORAI_CONFIG = path.join(tmpDir, "missing-config.json");
+
+    const svc = createInstanceSettingsService({ envFilePath });
+    const result = svc.getRuntimeSettings();
+
+    expect(result.slackDefaultChannelMemberIds.configured).toBe(true);
+    expect(result.slackDefaultChannelMemberIds.value).toBe("UDEFAULT1,UDEFAULT2");
+    expect(result.slackBoardApproverUserIds.configured).toBe(true);
+    expect(result.slackBoardApproverUserIds.source).toBe("orchestorai_env");
+    expect(result.slackBoardApproverUserIds.value).toBe("UDEFAULT1,UDEFAULT2");
+    expect(svc.getRuntimeValue("slackBoardApproverUserIds")).toBe("UDEFAULT1,UDEFAULT2");
   });
 
   it("writes updated secrets into the instance env file and preserves unrelated keys", () => {
@@ -111,6 +147,7 @@ describe("createInstanceSettingsService", () => {
     const svc = createInstanceSettingsService({ envFilePath });
     const result = svc.updateRuntimeSettings({
       authPublicBaseUrl: "https://saved.orchestorai.example.com",
+      slackBoardApproverUserIds: "U11111,U22222",
       slackBotToken: "xoxb-updated-token",
       slackManifestToken: "xoxe.xoxp-updated-manifest-token",
       slackSigningSecret: "updated-signing-secret",
@@ -120,12 +157,15 @@ describe("createInstanceSettingsService", () => {
     const contents = fs.readFileSync(envFilePath, "utf8");
     expect(contents).toContain("ORCHESTORAI_ENABLED=true");
     expect(contents).toContain("ORCHESTORAI_AUTH_PUBLIC_BASE_URL=https://saved.orchestorai.example.com");
+    expect(contents).toContain("SLACK_BOARD_APPROVER_USER_IDS=U11111,U22222");
     expect(contents).toContain("SLACK_BOT_TOKEN=xoxb-updated-token");
     expect(contents).toContain("SLACK_APP_MANIFEST_TOKEN=xoxe.xoxp-updated-manifest-token");
     expect(contents).toContain("SLACK_SIGNING_SECRET=updated-signing-secret");
     expect(contents).toContain("BETTER_AUTH_SECRET=updated-auth-secret");
     expect(result.authPublicBaseUrl.source).toBe("orchestorai_env");
     expect(result.authPublicBaseUrl.value).toBe("https://saved.orchestorai.example.com");
+    expect(result.slackBoardApproverUserIds.source).toBe("orchestorai_env");
+    expect(result.slackBoardApproverUserIds.value).toBe("U11111,U22222");
     expect(result.secrets.slackBotToken.source).toBe("orchestorai_env");
     expect(result.secrets.slackManifestToken.source).toBe("orchestorai_env");
     expect(result.secrets.slackSigningSecret.source).toBe("orchestorai_env");

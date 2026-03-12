@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { CheckCircle2, XCircle, Clock } from "lucide-react";
 import { Link } from "@/lib/router";
 import { Button } from "@/components/ui/button";
@@ -19,20 +20,46 @@ export function ApprovalCard({
   requesterAgent,
   onApprove,
   onReject,
+  actions,
   onOpen,
   detailLink,
   isPending,
 }: {
   approval: Approval;
   requesterAgent: Agent | null;
-  onApprove: () => void;
-  onReject: () => void;
+  onApprove?: () => void;
+  onReject?: () => void;
+  actions?: ReactNode;
   onOpen?: () => void;
   detailLink?: string;
   isPending: boolean;
 }) {
   const Icon = typeIcon[approval.type] ?? defaultTypeIcon;
   const label = typeLabel[approval.type] ?? approval.type;
+  const defaultActions =
+    (approval.status === "pending" || approval.status === "revision_requested") &&
+    onApprove &&
+    onReject ? (
+      <>
+        <Button
+          size="sm"
+          className="bg-green-700 hover:bg-green-600 text-white"
+          onClick={onApprove}
+          disabled={isPending}
+        >
+          Approve
+        </Button>
+        <Button
+          variant="destructive"
+          size="sm"
+          onClick={onReject}
+          disabled={isPending}
+        >
+          Reject
+        </Button>
+      </>
+    ) : null;
+  const renderedActions = actions ?? defaultActions;
 
   return (
     <div className="border border-border rounded-lg p-4 space-y-0">
@@ -67,24 +94,9 @@ export function ApprovalCard({
       )}
 
       {/* Actions */}
-      {(approval.status === "pending" || approval.status === "revision_requested") && (
+      {renderedActions && (
         <div className="flex gap-2 mt-4 pt-3 border-t border-border">
-          <Button
-            size="sm"
-            className="bg-green-700 hover:bg-green-600 text-white"
-            onClick={onApprove}
-            disabled={isPending}
-          >
-            Approve
-          </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={onReject}
-            disabled={isPending}
-          >
-            Reject
-          </Button>
+          {renderedActions}
         </div>
       )}
       <div className="mt-3">

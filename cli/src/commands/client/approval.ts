@@ -4,6 +4,7 @@ import {
   requestApprovalRevisionSchema,
   resolveApprovalSchema,
   resubmitApprovalSchema,
+  APPROVAL_RESOLUTION_MODES,
   type Approval,
   type ApprovalComment,
 } from "@orchestorai/shared";
@@ -24,6 +25,7 @@ interface ApprovalListOptions extends BaseClientOptions {
 interface ApprovalDecisionOptions extends BaseClientOptions {
   decisionNote?: string;
   decidedByUserId?: string;
+  resolutionMode?: string;
 }
 
 interface ApprovalCreateOptions extends BaseClientOptions {
@@ -141,12 +143,17 @@ export function registerApprovalCommands(program: Command): void {
       .argument("<approvalId>", "Approval ID")
       .option("--decision-note <text>", "Decision note")
       .option("--decided-by-user-id <id>", "Decision actor user ID")
+      .option(
+        "--resolution-mode <mode>",
+        `Resolution mode (${APPROVAL_RESOLUTION_MODES.join(" | ")})`,
+      )
       .action(async (approvalId: string, opts: ApprovalDecisionOptions) => {
         try {
           const ctx = resolveCommandContext(opts);
           const payload = resolveApprovalSchema.parse({
             decisionNote: opts.decisionNote,
             decidedByUserId: opts.decidedByUserId,
+            resolutionMode: opts.resolutionMode,
           });
           const updated = await ctx.api.post<Approval>(`/api/approvals/${approvalId}/approve`, payload);
           printOutput(updated, { json: ctx.json });

@@ -8,6 +8,7 @@ export { projectsApi } from "./projects";
 export { issuesApi } from "./issues";
 export { goalsApi } from "./goals";
 export { approvalsApi } from "./approvals";
+export { hostCommandFallbacksApi } from "./host-command-fallbacks";
 export { costsApi } from "./costs";
 export { activityApi } from "./activity";
 export { dashboardApi } from "./dashboard";

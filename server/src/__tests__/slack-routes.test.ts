@@ -4,9 +4,22 @@ import os from "node:os";
 import path from "node:path";
 import express from "express";
 import request from "supertest";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Db } from "@orchestorai/db";
-import { slackRoutes } from "../routes/slack.js";
+
+const mockStartLiveEventForwarder = vi.fn();
+const mockHandleSlackControlEvent = vi.fn();
+const mockHandleApprovalThreadMessage = vi.fn();
+
+vi.mock("../services/index.js", () => ({
+  slackIntegrationService: () => ({
+    startLiveEventForwarder: mockStartLiveEventForwarder,
+    handleSlackControlEvent: mockHandleSlackControlEvent,
+    handleApprovalThreadMessage: mockHandleApprovalThreadMessage,
+  }),
+}));
+
+const { slackRoutes } = await import("../routes/slack.js");
 
 const ORIGINAL_SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET;
 const ORIGINAL_SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
@@ -21,7 +34,10 @@ function signSlackBody(signingSecret: string, rawBody: string, timestamp: string
 
 function createTestApp() {
   const app = express();
-  app.use("/api/slack/control/events", express.raw({ type: "application/json" }));
+  app.use(
+    ["/api/slack/control/events", "/api/slack/control/approval-thread-replies"],
+    express.raw({ type: "application/json" }),
+  );
   app.use("/api", slackRoutes({} as Db));
   return app;
 }
@@ -41,6 +57,12 @@ afterEach(() => {
 
   if (ORIGINAL_ORCHESTORAI_CONFIG === undefined) delete process.env.ORCHESTORAI_CONFIG;
   else process.env.ORCHESTORAI_CONFIG = ORIGINAL_ORCHESTORAI_CONFIG;
+});
+
+beforeEach(() => {
+  mockStartLiveEventForwarder.mockClear();
+  mockHandleSlackControlEvent.mockClear();
+  mockHandleApprovalThreadMessage.mockClear();
 });
 
 function isolateOrchestorAIHome() {
@@ -115,5 +137,38 @@ describe("slackRoutes", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ challenge: "forwarded-by-bot" });
+  });
+
+  it("accepts signed approval-thread reply callbacks and forwards them to the Slack service", async () => {
+    isolateOrchestorAIHome();
+    process.env.SLACK_SIGNING_SECRET = "test-signing-secret";
+    mockHandleApprovalThreadMessage.mockResolvedValue({
+      handled: true,
+      outcome: "approved_once",
+    });
+
+    const payload = {
+      channelId: "C123",
+      threadTs: "1773160944.866529",
+      slackUserId: "U123",
+      text: "approved for now",
+    };
+    const rawBody = JSON.stringify(payload);
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const signature = signSlackBody(process.env.SLACK_SIGNING_SECRET, rawBody, timestamp);
+
+    const res = await request(createTestApp())
+      .post("/api/slack/control/approval-thread-replies")
+      .set("content-type", "application/json")
+      .set("x-slack-request-timestamp", timestamp)
+      .set("x-slack-signature", signature)
+      .send(rawBody);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      handled: true,
+      outcome: "approved_once",
+    });
+    expect(mockHandleApprovalThreadMessage).toHaveBeenCalledWith(payload);
   });
 });

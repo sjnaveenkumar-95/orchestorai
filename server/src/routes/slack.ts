@@ -62,6 +62,16 @@ function verifyInternalSlackBotRequest(input: {
   return safeCompare(expectedBotToken, providedToken);
 }
 
+function readRawBody(body: unknown) {
+  if (Buffer.isBuffer(body)) {
+    return body.toString("utf8");
+  }
+  if (typeof body === "string") {
+    return body;
+  }
+  return "";
+}
+
 export function slackRoutes(db: Db) {
   const router = Router();
   const slackSvc = slackIntegrationService(db);
@@ -102,12 +112,7 @@ export function slackRoutes(db: Db) {
   });
 
   router.post("/slack/control/events", async (req, res) => {
-    const rawBody =
-      Buffer.isBuffer(req.body)
-        ? req.body.toString("utf8")
-        : typeof req.body === "string"
-          ? req.body
-          : "";
+    const rawBody = readRawBody(req.body);
 
     const isInternalSlackBotRequest = verifyInternalSlackBotRequest({
       expectedBotToken: instanceSettings.getRuntimeSecretValue("slackBotToken"),
@@ -156,6 +161,53 @@ export function slackRoutes(db: Db) {
       .catch((err) => {
         logger.warn({ err }, "failed to handle Slack control event");
       });
+  });
+
+  router.post("/slack/control/approval-thread-replies", async (req, res) => {
+    const signingSecret = instanceSettings.getRuntimeSecretValue("slackSigningSecret");
+    if (!signingSecret) {
+      res.status(503).json({ error: "Slack signing secret is not configured" });
+      return;
+    }
+
+    const rawBody = readRawBody(req.body);
+    const isValid = verifySlackSignature({
+      signingSecret,
+      rawBody,
+      timestampHeader: req.header("x-slack-request-timestamp") ?? undefined,
+      signatureHeader: req.header("x-slack-signature") ?? undefined,
+    });
+
+    if (!isValid) {
+      res.status(401).json({ error: "Invalid Slack signature" });
+      return;
+    }
+
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(rawBody) as Record<string, unknown>;
+    } catch {
+      res.status(400).json({ error: "Invalid Slack payload" });
+      return;
+    }
+
+    const channelId = typeof payload.channelId === "string" ? payload.channelId.trim() : "";
+    const threadTs = typeof payload.threadTs === "string" ? payload.threadTs.trim() : "";
+    const slackUserId = typeof payload.slackUserId === "string" ? payload.slackUserId.trim() : "";
+    const text = typeof payload.text === "string" ? payload.text : "";
+
+    if (!channelId || !threadTs || !slackUserId) {
+      res.status(400).json({ error: "channelId, threadTs, and slackUserId are required" });
+      return;
+    }
+
+    const result = await slackSvc.handleApprovalThreadMessage({
+      channelId,
+      threadTs,
+      slackUserId,
+      text,
+    });
+    res.status(200).json(result);
   });
 
   return router;

@@ -698,20 +698,22 @@ Three-pane layout. Middle pane renders the approval payload nicely based on type
 
 **`approve_ceo_strategy` type:** Shows the strategy text, proposed goal breakdown, initial task structure.
 
+**`host_command_fallback` type:** Shows the exact binary, argv, working directory, missing command/local error excerpt, linked issue, execution status, Slack approval thread status, and any active project allowlist entry. If an allowlist entry is active, the detail view includes a revoke action.
+
 For pending approvals, prominent action buttons at the top of the middle pane:
 ```
 ┌─────────────────────────────────────────────────────────┐
 │ ┌─────────────────────────────────────────────────────┐ │
 │ │ Decision note (optional): _________________________ │ │
-│ │                          [✕ Reject]  [✓ Approve]    │ │
+│ │                 [✕ Reject]  [✓ Approve Once]  [✓ Approve Always] │ │
 │ └─────────────────────────────────────────────────────┘ │
 │                                                         │
-│ Hire Agent Request                                      │
+│ Host Command Fallback Request                           │
 │ ─────────────────                                       │
-│ Name: Marketing Analyst                                 │
-│ Role: marketing                                         │
-│ Reports to: CMO                                         │
-│ Budget: $100/month                                      │
+│ Binary: swift                                           │
+│ Args: test --filter PackageTests                        │
+│ Cwd: /workspace/project                                 │
+│ Missing command: swift                                  │
 │ ...                                                     │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -820,6 +822,7 @@ Items are grouped by category, with the most actionable items first:
 - Requester + relative timestamp
 - Key payload summary (1 line — agent name/role for hires, plan title for strategies)
 - Inline **[Approve]** and **[Reject]** buttons for simple approvals (hire_agent). Clicking Approve/Reject shows a brief confirmation with an optional decision note field.
+- Inline **[Approve Once]**, **[Approve Always]**, and **[Reject]** for `host_command_fallback` approvals. The detail link remains available for inspecting command output, Slack approval thread status, and allowlist state.
 - **[View details →]** link for complex approvals (approve_ceo_strategy) that need full review before deciding.
 - "See all approvals →" link in the category header navigates to `/approvals`.
 

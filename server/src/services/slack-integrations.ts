@@ -4,6 +4,7 @@ import type { Db } from "@orchestorai/db";
 import {
   agentSlackApps,
   agents,
+  approvals,
   authUsers,
   companies,
   heartbeatRuns,
@@ -12,6 +13,7 @@ import {
   projectSlackMemberships,
   projects,
   slackActionRuns,
+  slackApprovalThreadLinks,
   slackEventReceipts,
   slackThreadLinks,
 } from "@orchestorai/db";
@@ -23,6 +25,7 @@ import type {
   ProjectSlackState,
   SlackControlInterpreterResult,
   SlackControlMessageContext,
+  SlackApprovalThreadLink,
   SlackThreadLink,
 } from "@orchestorai/shared";
 import {
@@ -38,6 +41,8 @@ import { notFound, unprocessable } from "../errors.js";
 import { agentService } from "./agents.js";
 import { heartbeatService } from "./heartbeat.js";
 import { issueCommandService } from "./issue-commands.js";
+import { approvalService } from "./approvals.js";
+import { hostCommandFallbackService } from "./host-command-fallbacks.js";
 import { issueService } from "./issues.js";
 import { logActivity } from "./activity-log.js";
 import { subscribeAllLiveEvents } from "./live-events.js";
@@ -110,6 +115,7 @@ const SLACK_SYSTEM_ACTOR_ID = "slack_control";
 const SLACK_AUTO_APPLY_CONFIDENCE = 0.7;
 const SLACK_API_TIMEOUT_MS = 15000;
 const SLACK_THREAD_STATUS_REFRESH_MS = 4000;
+const ACTIONABLE_APPROVAL_STATUSES = new Set(["pending", "revision_requested"]);
 
 type SlackForwarderState = {
   db: object | null;
@@ -511,6 +517,67 @@ function toSlackThreadLink(row: typeof slackThreadLinks.$inferSelect): SlackThre
   };
 }
 
+function toSlackApprovalThreadLink(
+  row: typeof slackApprovalThreadLinks.$inferSelect,
+): SlackApprovalThreadLink {
+  return {
+    id: row.id,
+    companyId: row.companyId,
+    approvalId: row.approvalId,
+    projectId: row.projectId,
+    projectSlackChannelId: row.projectSlackChannelId,
+    channelId: row.channelId,
+    threadTs: row.threadTs,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function buildSlackOriginDescription(input: {
+  text: string;
+  slackUserId?: string | null;
+  channelId: string;
+  threadTs: string;
+}) {
+  return [
+    "_Created from Slack_",
+    `Slack user: ${input.slackUserId ? `<@${input.slackUserId}>` : "unknown-user"}`,
+    `Slack channel: ${input.channelId}`,
+    `Slack thread: ${input.threadTs}`,
+    "",
+    input.text.trim(),
+  ].join("\n");
+}
+
+function buildSlackCommentBody(input: {
+  text: string;
+  slackUserId?: string | null;
+  channelId: string;
+  threadTs: string;
+}) {
+  return [
+    `Slack reply from ${input.slackUserId ? `<@${input.slackUserId}>` : "unknown-user"}`,
+    `Channel: ${input.channelId}`,
+    `Thread: ${input.threadTs}`,
+    "",
+    input.text.trim(),
+  ].join("\n");
+}
+
+function buildSlackApprovalCommentBody(input: {
+  text: string;
+  slackUserId?: string | null;
+  channelId: string;
+  threadTs: string;
+}) {
+  return [
+    `Slack approval-thread reply from ${input.slackUserId ? `<@${input.slackUserId}>` : "unknown-user"}`,
+    `Channel: ${input.channelId}`,
+    `Thread: ${input.threadTs}`,
+    "",
+    input.text.trim(),
+  ].join("\n");
+}
 type SlackChannelLookup = {
   id: string;
   name: string;
@@ -708,6 +775,8 @@ export function slackIntegrationService(db: Db) {
   const heartbeat = heartbeatService(db);
   const issueCommands = issueCommandService(db);
   const interpreter = slackActionInterpreterService({ instanceSettings });
+  const approvalsSvc = approvalService(db);
+  const hostCommandSvc = hostCommandFallbackService(db);
   const issuesSvc = issueService(db);
   const projectsSvc = projectService(db);
   const slackUserLabelCache = new Map<string, Promise<string>>();
@@ -2252,6 +2321,71 @@ export function slackIntegrationService(db: Db) {
       .then((rows) => (rows[0] ? toSlackThreadLink(rows[0]) : null));
   }
 
+  async function getApprovalThreadLinkBySlackThread(channelId: string, threadTs: string) {
+    return db
+      .select()
+      .from(slackApprovalThreadLinks)
+      .where(
+        and(
+          eq(slackApprovalThreadLinks.channelId, channelId),
+          eq(slackApprovalThreadLinks.threadTs, threadTs),
+        ),
+      )
+      .orderBy(desc(slackApprovalThreadLinks.updatedAt), desc(slackApprovalThreadLinks.createdAt))
+      .then((rows) => (rows[0] ? toSlackApprovalThreadLink(rows[0]) : null));
+  }
+
+  async function upsertApprovalThreadLink(input: {
+    companyId: string;
+    approvalId: string;
+    projectId: string | null;
+    projectSlackChannelId: string | null;
+    channelId: string;
+    threadTs: string;
+  }) {
+    const updated = await db
+      .insert(slackApprovalThreadLinks)
+      .values({
+        companyId: input.companyId,
+        approvalId: input.approvalId,
+        projectId: input.projectId,
+        projectSlackChannelId: input.projectSlackChannelId,
+        channelId: input.channelId,
+        threadTs: input.threadTs,
+      })
+      .onConflictDoUpdate({
+        target: [slackApprovalThreadLinks.approvalId],
+        set: {
+          companyId: input.companyId,
+          projectId: input.projectId,
+          projectSlackChannelId: input.projectSlackChannelId,
+          channelId: input.channelId,
+          threadTs: input.threadTs,
+          updatedAt: new Date(),
+        },
+      })
+      .returning()
+      .then((rows) => rows[0] ?? null);
+    return updated ? toSlackApprovalThreadLink(updated) : null;
+  }
+
+function parseApprovalDecision(text: string): "once" | "always" | "reject" | null {
+    const normalized = stripLeadingSlackMentions(text)
+      .trim()
+      .toLowerCase()
+      .replace(/[.!]+$/g, "");
+    if (normalized === "approved for now") return "once";
+    if (normalized === "approved always") return "always";
+    if (normalized === "reject" || normalized === "rejected") return "reject";
+    return null;
+  }
+
+  function parseConfiguredSlackApproverIds() {
+    return new Set(
+      parseSlackMemberIds(instanceSettings.getRuntimeValue("slackBoardApproverUserIds")),
+    );
+  }
+
   async function activateThreadLink(input: {
     companyId: string;
     issueId: string;
@@ -2799,6 +2933,248 @@ export function slackIntegrationService(db: Db) {
     return comment;
   }
 
+  async function postHostCommandFallbackApprovalMessage(input: {
+    approvalId: string;
+    projectId: string | null;
+  }) {
+    if (!input.projectId) return null;
+
+    const projectSlack = await listProjectSlackState(input.projectId);
+    const channel = projectSlack.channel;
+    if (!channel?.channelId || channel.status !== "active") {
+      return null;
+    }
+
+    const approval = await approvalsSvc.getById(input.approvalId);
+    if (!approval || approval.type !== "host_command_fallback") {
+      return null;
+    }
+    const request = await hostCommandSvc.getByApprovalId(input.approvalId);
+    if (!request) return null;
+
+    const controlClient = await getControlClient();
+    if (!controlClient) {
+      return null;
+    }
+
+    const posted = await controlClient.postMessage({
+      channel: channel.channelId,
+      text: [
+        "*OrchestorAI approval required: host command fallback*",
+        `Approval: ${approval.id}`,
+        `Issue: ${request.issueId}`,
+        `Binary: \`${request.binary}\``,
+        `Args: ${request.args.length > 0 ? `\`${request.args.join(" ")}\`` : "`(none)`"}`,
+        `Cwd: \`${request.cwd}\``,
+        `Reason: ${request.reason}`,
+        request.missingCommand ? `Missing command: \`${request.missingCommand}\`` : null,
+        request.localErrorExcerpt ? `Local error: ${request.localErrorExcerpt}` : null,
+        "",
+        "Reply in this thread with one of:",
+        "- `approved for now`",
+        "- `approved always`",
+        "- `reject`",
+      ]
+        .filter((line): line is string => Boolean(line))
+        .join("\n"),
+    });
+
+    return upsertApprovalThreadLink({
+      companyId: approval.companyId,
+      approvalId: approval.id,
+      projectId: request.projectId,
+      projectSlackChannelId: channel.id,
+      channelId: posted.channel,
+      threadTs: posted.threadTs,
+    });
+  }
+
+  async function postApprovalThreadResponse(input: {
+    link: SlackApprovalThreadLink;
+    text: string;
+  }) {
+    const message = input.text.trim();
+    if (!message) return;
+
+    const controlClient = await getControlClient();
+    if (!controlClient) return;
+
+    try {
+      await controlClient.postMessage({
+        channel: input.link.channelId,
+        threadTs: input.link.threadTs,
+        text: message,
+      });
+    } catch (error) {
+      logger.warn(
+        { err: error, approvalId: input.link.approvalId, channelId: input.link.channelId },
+        "failed to post Slack approval thread response",
+      );
+    }
+  }
+
+  async function handleApprovalThreadReply(input: {
+    link: SlackApprovalThreadLink;
+    event: SlackControlMessageEvent;
+  }) {
+    const slackUserId = readNonEmptyString(input.event.user);
+    if (!slackUserId) {
+      return { handled: true as const, outcome: "ignored" as const };
+    }
+
+    const approverIds = parseConfiguredSlackApproverIds();
+    if (!approverIds.has(slackUserId)) {
+      await postApprovalThreadResponse({
+        link: input.link,
+        text: "Only configured board approvers can approve or reject this request from Slack.",
+      });
+      return { handled: true as const, outcome: "unauthorized" as const };
+    }
+
+    const approval = await approvalsSvc.getById(input.link.approvalId);
+    if (!approval) {
+      await postApprovalThreadResponse({
+        link: input.link,
+        text: "This approval request no longer exists.",
+      });
+      return { handled: true as const, outcome: "missing_approval" as const };
+    }
+
+    const text = stripLeadingSlackMentions(input.event.text ?? "");
+    if (!text) {
+      return { handled: true as const, outcome: "ignored" as const };
+    }
+
+    const request = await hostCommandSvc.getByApprovalId(approval.id);
+    const actorId = `slack:${slackUserId}`;
+    const decision = parseApprovalDecision(text);
+
+    if (decision && !ACTIONABLE_APPROVAL_STATUSES.has(approval.status)) {
+      await postApprovalThreadResponse({
+        link: input.link,
+        text: `This approval is already ${approval.status.replace(/_/g, " ")}.`,
+      });
+      return { handled: true as const, outcome: "already_resolved" as const };
+    }
+
+    if (decision === "once" || decision === "always") {
+      await hostCommandSvc.assertCanApprove(
+        approval.id,
+        decision === "always" ? "always" : "once",
+      );
+      const updated = await approvalsSvc.approve(approval.id, actorId, null);
+
+      await logActivity(db, {
+        companyId: updated.companyId,
+        actorType: "user",
+        actorId,
+        action: "approval.approved",
+        entityType: "approval",
+        entityId: updated.id,
+        details: {
+          type: updated.type,
+          requestedByAgentId: updated.requestedByAgentId,
+          linkedIssueIds: request ? [request.issueId] : [],
+          source: "slack",
+          slackUserId,
+        },
+      });
+
+      await hostCommandSvc.handleApprovalApproved(updated.id, actorId, decision);
+      await postApprovalThreadResponse({
+        link: input.link,
+        text:
+          decision === "always"
+            ? "Approved always. This request is queued, and future requests for this binary in this project will bypass approval."
+            : "Approved for now. This request is queued for one-time host execution.",
+      });
+      return {
+        handled: true as const,
+        outcome: decision === "always" ? ("approved_always" as const) : ("approved_once" as const),
+      };
+    }
+
+    if (decision === "reject") {
+      const updated = await approvalsSvc.reject(approval.id, actorId, null);
+
+      await logActivity(db, {
+        companyId: updated.companyId,
+        actorType: "user",
+        actorId,
+        action: "approval.rejected",
+        entityType: "approval",
+        entityId: updated.id,
+        details: {
+          type: updated.type,
+          source: "slack",
+          slackUserId,
+        },
+      });
+
+      await hostCommandSvc.handleApprovalRejected(updated.id, actorId);
+      await postApprovalThreadResponse({
+        link: input.link,
+        text: "Rejected. This host command request will not execute.",
+      });
+      return { handled: true as const, outcome: "rejected" as const };
+    }
+
+    const comment = await approvalsSvc.addComment(
+      approval.id,
+      buildSlackApprovalCommentBody({
+        text,
+        slackUserId,
+        channelId: input.link.channelId,
+        threadTs: input.link.threadTs,
+      }),
+      { userId: actorId },
+    );
+
+    await logActivity(db, {
+      companyId: approval.companyId,
+      actorType: "user",
+      actorId,
+      action: "approval.comment_added",
+      entityType: "approval",
+      entityId: approval.id,
+      details: {
+        commentId: comment.id,
+        source: "slack",
+        slackUserId,
+      },
+    });
+
+    await postApprovalThreadResponse({
+      link: input.link,
+      text: "Recorded as an approval comment.",
+    });
+    return { handled: true as const, outcome: "comment_added" as const };
+  }
+
+  async function handleApprovalThreadMessage(input: {
+    channelId: string;
+    threadTs: string;
+    slackUserId?: string | null;
+    text?: string | null;
+  }) {
+    const link = await getApprovalThreadLinkBySlackThread(input.channelId, input.threadTs);
+    if (!link) {
+      return { handled: false as const, outcome: "not_found" as const };
+    }
+
+    return handleApprovalThreadReply({
+      link,
+      event: {
+        type: "message",
+        channel: input.channelId,
+        thread_ts: input.threadTs,
+        ts: input.threadTs,
+        user: input.slackUserId ?? undefined,
+        text: input.text ?? undefined,
+      },
+    });
+  }
+
   async function handleSlackControlEvent(envelope: SlackControlEventEnvelope) {
     if (envelope.type !== "event_callback" || !envelope.event_id || !envelope.event) {
       return;
@@ -2832,6 +3208,18 @@ export function slackIntegrationService(db: Db) {
     if (!threadTs) return;
 
     const isThreadReply = Boolean(envelope.event.thread_ts && envelope.event.thread_ts !== envelope.event.ts);
+    if (isThreadReply) {
+      const approvalResult = await handleApprovalThreadMessage({
+        channelId,
+        threadTs,
+        slackUserId: envelope.event.user ?? null,
+        text: envelope.event.text ?? null,
+      });
+      if (approvalResult.handled) {
+        return;
+      }
+    }
+
     const normalizedText = collapseWhitespace(stripLeadingSlackMentions(envelope.event.text ?? ""));
     if (!normalizedText) return;
 
@@ -3735,5 +4123,7 @@ export function slackIntegrationService(db: Db) {
     listProjectSlackState,
     syncAgentProjectMemberships,
     getThreadLinkByIssue,
+    postHostCommandFallbackApprovalMessage,
+    handleApprovalThreadMessage,
   };
 }

@@ -225,6 +225,13 @@
       "when": 1773117351243,
       "tag": "0031_natural_whizzer",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1773348537604,
+      "tag": "0032_mushy_skullbuster",
+      "breakpoints": true
     }
   ]
 }
