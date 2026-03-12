@@ -1,0 +1,105 @@
+{
+  "slack": {
+    "mode": "socket",
+    "botToken": "xoxb-your-bot-token",
+    "appToken": "xapp-your-app-token",
+    "signingSecret": "",
+    "appId": "A0000000000",
+    "webhookPath": "/slack/events",
+    "port": 3000,
+    "dm": {
+      "enabled": true,
+      "policy": "pairing",
+      "allowFrom": [
+        "*"
+      ],
+      "groupEnabled": false,
+      "groupChannels": []
+    },
+    "groupPolicy": "allowlist",
+    "channelAllowlist": [
+      "C0123456789",
+      "#engineering"
+    ],
+    "channels": {
+      "C0123456789": {
+        "requireMention": true,
+        "users": [
+          "U0123456789"
+        ],
+        "allowBots": false
+      }
+    },
+    "defaultRequireMention": true,
+    "mentionPatterns": [
+      "\\bopenclaw\\b"
+    ],
+    "dangerouslyAllowNameMatching": false,
+    "allowBots": false,
+    "replyToMode": "off",
+    "replyToModeByChatType": {
+      "direct": "all",
+      "group": "first",
+      "channel": "first"
+    },
+    "thread": {
+      "historyScope": "thread",
+      "inheritParent": false,
+      "initialHistoryLimit": 20
+    },
+    "textChunkLimit": 4000,
+    "chunkMode": "length",
+    "mediaMaxMb": 20,
+    "streaming": "partial",
+    "nativeStreaming": true,
+    "ackReaction": "eyes",
+    "removeAckAfterReply": false,
+    "commands": {
+      "native": true
+    },
+    "slashCommand": {
+      "enabled": true,
+      "name": "openclaw",
+      "ephemeral": true
+    },
+    "actions": {
+      "messages": true,
+      "reactions": true,
+      "pins": true,
+      "memberInfo": true,
+      "emojiList": true
+    },
+    "configWrites": false,
+    "inboundDebounceMs": 800
+  },
+  "codex": {
+    "model": "gpt-5.3-codex",
+    "profile": "",
+    "workdir": "../..",
+    "timeoutMs": 120000,
+    "systemPrompt": "You are Codex. Reply concisely and helpfully."
+  },
+  "orchestorai": {
+    "enabled": false,
+    "apiUrl": "http://127.0.0.1:3100",
+    "companyId": "company-id",
+    "taskPrefix": "task:",
+    "triggerMentions": [
+      "@orchestorai"
+    ],
+    "agentMappings": {
+      "U0123456789": "00000000-0000-0000-0000-000000000001",
+      "@backend": "00000000-0000-0000-0000-000000000001"
+    },
+    "projectMappings": {
+      "mobile": "00000000-0000-0000-0000-000000000010",
+      "project:mobile": "00000000-0000-0000-0000-000000000010"
+    },
+    "syncReplies": "mention_only",
+    "notificationMode": "high_signal"
+  },
+  "runtime": {
+    "logLevel": "info",
+    "dataDir": "./data"
+  }
+}

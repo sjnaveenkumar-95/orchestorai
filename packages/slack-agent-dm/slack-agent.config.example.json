@@ -1,0 +1,21 @@
+{
+  "slack": {
+    "mode": "socket",
+    "dm": {
+      "enabled": true,
+      "policy": "pairing"
+    }
+  },
+  "model": {
+    "provider": "codex_cli",
+    "codexCli": {
+      "model": "gpt-5.3-codex",
+      "reasoningEffort": "",
+      "sandbox": "workspace-write",
+      "additionalWritableDirs": []
+    }
+  },
+  "runtime": {
+    "dataDir": "data/slack-agent-dm"
+  }
+}

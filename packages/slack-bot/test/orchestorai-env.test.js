@@ -16,36 +16,47 @@ test("resolveOrchestorAIEnvPath prefers ORCHESTORAI_CONFIG when present", () => 
   assert.equal(resolved, "/tmp/orchestorai/instances/default/.env");
 });
 
-test("loadOrchestorAIEnvIntoProcess overrides Slack tokens from the OrchestorAI env file", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "orchestorai-slack-env-"));
-  const configPath = path.join(tmpDir, "instances", "default", "config.json");
-  const envPath = path.join(tmpDir, "instances", "default", ".env");
+test("resolveOrchestorAIEnvPath falls back to the home instance env path", () => {
+  const resolved = resolveOrchestorAIEnvPath({
+    env: {
+      HOME: "/tmp/test-home",
+    },
+  });
 
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, "{}\n", "utf8");
+  assert.equal(resolved, "/tmp/test-home/.orchestorai/instances/default/.env");
+});
+
+test("loadOrchestorAIEnvIntoProcess loads OrchestorAI bridge settings from the home env file", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "orchestorai-slack-env-"));
+  const envPath = path.join(tmpDir, ".orchestorai", "instances", "default", ".env");
+
+  fs.mkdirSync(path.dirname(envPath), { recursive: true });
   fs.writeFileSync(
     envPath,
     [
-      "SLACK_BOT_TOKEN=xoxb-from-orchestorai",
-      "SLACK_APP_TOKEN=xapp-from-orchestorai",
+      "ORCHESTORAI_ENABLED=true",
+      "ORCHESTORAI_API_URL=http://127.0.0.1:3100",
+      "ORCHESTORAI_COMPANY_ID=company-from-home-env",
       "",
     ].join("\n"),
     "utf8",
   );
 
   const env = {
-    ORCHESTORAI_CONFIG: configPath,
-    SLACK_BOT_TOKEN: "xoxb-from-project-env",
-    SLACK_APP_TOKEN: "xapp-from-project-env",
+    HOME: tmpDir,
+    ORCHESTORAI_ENABLED: "false",
+    ORCHESTORAI_API_URL: "http://127.0.0.1:9999",
+    ORCHESTORAI_COMPANY_ID: "company-from-process-env",
   };
 
   const result = loadOrchestorAIEnvIntoProcess({
     env,
-    keys: ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"],
+    keys: ["ORCHESTORAI_ENABLED", "ORCHESTORAI_API_URL", "ORCHESTORAI_COMPANY_ID"],
   });
 
   assert.equal(result.envPath, envPath);
-  assert.deepEqual(result.loadedKeys, ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"]);
-  assert.equal(env.SLACK_BOT_TOKEN, "xoxb-from-orchestorai");
-  assert.equal(env.SLACK_APP_TOKEN, "xapp-from-orchestorai");
+  assert.deepEqual(result.loadedKeys, ["ORCHESTORAI_ENABLED", "ORCHESTORAI_API_URL", "ORCHESTORAI_COMPANY_ID"]);
+  assert.equal(env.ORCHESTORAI_ENABLED, "true");
+  assert.equal(env.ORCHESTORAI_API_URL, "http://127.0.0.1:3100");
+  assert.equal(env.ORCHESTORAI_COMPANY_ID, "company-from-home-env");
 });

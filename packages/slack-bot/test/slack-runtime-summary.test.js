@@ -5,6 +5,8 @@ import {
   buildOrchestorAILatestCommentSummary,
   buildOrchestorAIIssueSummary,
   buildOrchestorAIOverviewSummary,
+  composeSlackReplyText,
+  selectCreateIssueProjectReference,
 } from "../src/slack-runtime.js";
 
 test("buildOrchestorAIIssueSummary renders a concise ticket summary", () => {
@@ -82,4 +84,40 @@ test("buildOrchestorAILatestCommentSummary handles tickets with no comments", ()
   });
 
   assert.equal(summary, "*Summary*\n- AND-15 has no comments yet.");
+});
+
+test("composeSlackReplyText prefers runtime action status over Codex narration for OrchestorAI mutations", () => {
+  const reply = composeSlackReplyText({
+    replyText: "Created the task and assigned it.",
+    actionSummary: "OrchestorAI action failed: Could not resolve assignee: U0AKA233HGA",
+    hasOrchestorAIAction: true,
+  });
+
+  assert.equal(reply, "OrchestorAI action failed: Could not resolve assignee: U0AKA233HGA");
+});
+
+test("selectCreateIssueProjectReference prefers the Slack channel mapping over Codex project text", () => {
+  const result = selectCreateIssueProjectReference({
+    channelType: "channel",
+    channelName: "mac-screen-share",
+    actionProject: "OrchestorAI",
+  });
+
+  assert.deepEqual(result, {
+    reference: "mac-screen-share",
+    source: "channel",
+  });
+});
+
+test("selectCreateIssueProjectReference falls back to explicit project only without channel context", () => {
+  const result = selectCreateIssueProjectReference({
+    channelType: "im",
+    channelName: "",
+    actionProject: "Eyalty App",
+  });
+
+  assert.deepEqual(result, {
+    reference: "Eyalty App",
+    source: "action",
+  });
 });

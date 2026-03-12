@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
 import { spawn } from "node:child_process";
 
 function parseBool(value, fallback = false) {
@@ -18,6 +20,67 @@ function parseBool(value, fallback = false) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function loadEnvFile(filePath, targetEnv) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return null;
+  }
+  const raw = fs.readFileSync(filePath, "utf8");
+  const loadedKeys = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+    const separator = trimmed.indexOf("=");
+    if (separator <= 0) {
+      continue;
+    }
+    const key = trimmed.slice(0, separator).trim();
+    const value = trimmed.slice(separator + 1).trim();
+    if (targetEnv[key] !== undefined && targetEnv[key] !== "") {
+      continue;
+    }
+    targetEnv[key] = value;
+    loadedKeys.push(key);
+  }
+  return { filePath, loadedKeys };
+}
+
+function isNonEmpty(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function expandHomePrefix(value, env) {
+  const homeDir = env.HOME || os.homedir();
+  if (value === "~") {
+    return homeDir;
+  }
+  if (value.startsWith("~/")) {
+    return path.resolve(homeDir, value.slice(2));
+  }
+  return value;
+}
+
+function resolveOrchestorAIHomeDir(env) {
+  if (isNonEmpty(env.ORCHESTORAI_HOME)) {
+    return path.resolve(expandHomePrefix(env.ORCHESTORAI_HOME.trim(), env));
+  }
+  return path.resolve(env.HOME || os.homedir(), ".orchestorai");
+}
+
+function resolveOrchestorAIEnvPath(env) {
+  if (isNonEmpty(env.ORCHESTORAI_ENV_FILE)) {
+    return path.resolve(env.ORCHESTORAI_ENV_FILE.trim());
+  }
+  if (isNonEmpty(env.ORCHESTORAI_CONFIG)) {
+    return path.resolve(path.dirname(env.ORCHESTORAI_CONFIG.trim()), ".env");
+  }
+  const instanceId = isNonEmpty(env.ORCHESTORAI_INSTANCE_ID)
+    ? env.ORCHESTORAI_INSTANCE_ID.trim()
+    : "default";
+  return path.resolve(resolveOrchestorAIHomeDir(env), "instances", instanceId, ".env");
 }
 
 async function waitForOrchestorAI(baseUrl, timeoutMs) {
@@ -48,6 +111,13 @@ const cwd = process.cwd();
 const env = {
   ...process.env,
 };
+const slackEnvPath = process.env.SLACK_CHANNEL_BOT_ENV_FILE
+  ? path.resolve(cwd, process.env.SLACK_CHANNEL_BOT_ENV_FILE)
+  : process.env.SLACK_BOT_ENV_FILE
+    ? path.resolve(cwd, process.env.SLACK_BOT_ENV_FILE)
+    : path.join(cwd, "packages", "slack-channel-bot", ".env");
+loadEnvFile(slackEnvPath, env);
+loadEnvFile(resolveOrchestorAIEnvPath(env), env);
 
 if (!env.CODEX_WORKDIR) {
   env.CODEX_WORKDIR = cwd;
@@ -60,8 +130,8 @@ if (!env.ORCHESTORAI_API_URL) {
 }
 if (!env.DATA_DIR) {
   env.DATA_DIR = env.ORCHESTORAI_HOME
-    ? path.join(env.ORCHESTORAI_HOME, "slack-bot", "data")
-    : path.join(cwd, "packages", "slack-bot", "data");
+    ? path.join(env.ORCHESTORAI_HOME, "slack-channel-bot", "data")
+    : path.join(cwd, "packages", "slack-channel-bot", "data");
 }
 if (!env.ORCHESTORAI_ENABLED && env.ORCHESTORAI_COMPANY_ID) {
   env.ORCHESTORAI_ENABLED = "true";
@@ -154,10 +224,16 @@ async function main() {
     await new Promise(() => {});
   }
 
-  console.log(`[stack] waiting for OrchestorAI at ${env.ORCHESTORAI_API_URL} before starting Slack bot`);
+  console.log(
+    `[stack] waiting for OrchestorAI at ${env.ORCHESTORAI_API_URL} before starting Slack bot`,
+  );
   await waitForOrchestorAI(env.ORCHESTORAI_API_URL, 120000);
   console.log("[stack] OrchestorAI is ready; starting Slack bot");
-  spawnManaged("orchestorai-slack-bot", pnpmBin, ["--filter", "@orchestorai/slack-bot", "start"]);
+  spawnManaged("orchestorai-slack-bot", pnpmBin, [
+    "--filter",
+    "@orchestorai/slack-bot",
+    "start",
+  ]);
 
   await new Promise(() => {});
 }
