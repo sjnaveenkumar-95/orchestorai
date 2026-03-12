@@ -9,15 +9,17 @@ async function writeFakeCodexCommand(commandPath: string): Promise<void> {
 const fs = require("node:fs");
 
 const capturePath = process.env.ORCHESTORAI_TEST_CAPTURE_PATH;
-const payload = {
+  const payload = {
   argv: process.argv.slice(2),
   prompt: fs.readFileSync(0, "utf8"),
   env: {
     AGENT_HOME: process.env.AGENT_HOME || "",
     ORCHESTORAI_AGENT_HOME: process.env.ORCHESTORAI_AGENT_HOME || "",
     ORCHESTORAI_AGENT_ID: process.env.ORCHESTORAI_AGENT_ID || "",
+    ORCHESTORAI_API_URL: process.env.ORCHESTORAI_API_URL || "",
     ORCHESTORAI_API_KEY: process.env.ORCHESTORAI_API_KEY || "",
     ORCHESTORAI_COMPANY_ID: process.env.ORCHESTORAI_COMPANY_ID || "",
+    ORCHESTORAI_HOST_COMMAND_FALLBACK_URL: process.env.ORCHESTORAI_HOST_COMMAND_FALLBACK_URL || "",
     ORCHESTORAI_RUN_ID: process.env.ORCHESTORAI_RUN_ID || "",
     ORCHESTORAI_TASK_ID: process.env.ORCHESTORAI_TASK_ID || "",
     ORCHESTORAI_WAKE_REASON: process.env.ORCHESTORAI_WAKE_REASON || "",
@@ -71,8 +73,10 @@ describe("codex_local execute", () => {
 
     const previousHome = process.env.HOME;
     const previousCodexHome = process.env.CODEX_HOME;
+    const previousApiUrl = process.env.ORCHESTORAI_API_URL;
     process.env.HOME = root;
     process.env.CODEX_HOME = path.join(root, ".codex");
+    process.env.ORCHESTORAI_API_URL = "http://127.0.0.1:3100";
 
     let invocationPrompt = "";
     try {
@@ -135,12 +139,17 @@ describe("codex_local execute", () => {
       expect(capture.prompt).toContain("Because wake reason is issue_assigned, this run must not end as bootstrap-only output.");
       expect(capture.prompt).toContain("Never end with phrases such as 'ready for the concrete assignment'");
       expect(capture.prompt).toContain("Do not ask the user for the task again when the task is already present in OrchestorAI issue/context.");
+      expect(capture.prompt).toContain("If a required bare binary fails with exact `command not found` or ENOENT in this local runtime");
+      expect(capture.prompt).toContain("Host command fallback endpoint for this run: http://127.0.0.1:3100/api/companies/company-1/host-command-fallbacks");
       expect(capture.prompt).toContain(`Use ORCHESTORAI_AGENT_HOME=${agentHome} as the effective agent home for this run.`);
       expect(capture.prompt).toContain("The above agent instructions were loaded from");
       expect(capture.prompt).toContain("Resolve any relative file references from");
       expect(capture.prompt).toContain("Follow the orchestorai heartbeat.");
       expect(invocationPrompt).toContain("OrchestorAI heartbeat directive:");
       expect(capture.env.ORCHESTORAI_AGENT_HOME).toBe(agentHome);
+      expect(capture.env.ORCHESTORAI_API_URL).toBe("http://127.0.0.1:3100");
+      expect(capture.env.ORCHESTORAI_HOST_COMMAND_FALLBACK_URL)
+        .toBe("http://127.0.0.1:3100/api/companies/company-1/host-command-fallbacks");
       expect(capture.env.ORCHESTORAI_TASK_ID).toBe("issue-123");
       expect(capture.env.ORCHESTORAI_WAKE_REASON).toBe("issue_assigned");
       expect(capture.env.ORCHESTORAI_WAKE_COMMENT_ID).toBe("comment-456");
@@ -159,6 +168,11 @@ describe("codex_local execute", () => {
       } else {
         process.env.CODEX_HOME = previousCodexHome;
       }
+      if (previousApiUrl === undefined) {
+        delete process.env.ORCHESTORAI_API_URL;
+      } else {
+        process.env.ORCHESTORAI_API_URL = previousApiUrl;
+      }
       await fs.rm(root, { recursive: true, force: true });
     }
   });
@@ -176,9 +190,11 @@ describe("codex_local execute", () => {
     const previousHome = process.env.HOME;
     const previousCodexHome = process.env.CODEX_HOME;
     const previousAgentHome = process.env.AGENT_HOME;
+    const previousApiUrl = process.env.ORCHESTORAI_API_URL;
     process.env.HOME = root;
     process.env.CODEX_HOME = path.join(root, ".codex");
     process.env.AGENT_HOME = path.join(root, "inherited-parent-agent-home");
+    process.env.ORCHESTORAI_API_URL = "http://127.0.0.1:3100";
 
     try {
       const result = await execute({
@@ -222,10 +238,13 @@ describe("codex_local execute", () => {
       expect(capture.prompt).toContain(`Effective agent home: ${agentHome}`);
       expect(capture.prompt).toContain("Wake reason: heartbeat_timer");
       expect(capture.prompt).toContain("If no direct task context is provided, run the normal heartbeat workflow");
+      expect(capture.prompt).toContain("Host command fallback endpoint for this run: http://127.0.0.1:3100/api/companies/company-1/host-command-fallbacks");
       expect(capture.prompt).toContain(`Use ORCHESTORAI_AGENT_HOME=${agentHome} as the effective agent home for this run.`);
       expect(capture.prompt).toContain("You are CTO. Read HEARTBEAT.md, SOUL.md, and TOOLS.md.");
       expect(capture.prompt).toContain(`The above agent instructions were loaded from ${instructionsFilePath}.`);
       expect(capture.prompt).toContain(`Resolve any relative file references from ${agentHome}/.`);
+      expect(capture.env.ORCHESTORAI_HOST_COMMAND_FALLBACK_URL)
+        .toBe("http://127.0.0.1:3100/api/companies/company-1/host-command-fallbacks");
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;
@@ -241,6 +260,11 @@ describe("codex_local execute", () => {
         delete process.env.AGENT_HOME;
       } else {
         process.env.AGENT_HOME = previousAgentHome;
+      }
+      if (previousApiUrl === undefined) {
+        delete process.env.ORCHESTORAI_API_URL;
+      } else {
+        process.env.ORCHESTORAI_API_URL = previousApiUrl;
       }
       await fs.rm(root, { recursive: true, force: true });
     }

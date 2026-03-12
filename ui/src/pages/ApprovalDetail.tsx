@@ -1,20 +1,181 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "@/lib/router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate, useParams, useSearchParams } from "@/lib/router";
+import { CheckCircle2, ChevronRight, Sparkles } from "lucide-react";
+import type { ApprovalComment, HostCommandRequestDetail } from "@orchestorai/shared";
 import { approvalsApi } from "../api/approvals";
 import { agentsApi } from "../api/agents";
-import { useCompany } from "../context/CompanyContext";
-import { useBreadcrumbs } from "../context/BreadcrumbContext";
-import { queryKeys } from "../lib/queryKeys";
-import { StatusBadge } from "../components/StatusBadge";
-import { Identity } from "../components/Identity";
+import { hostCommandFallbacksApi } from "../api/host-command-fallbacks";
+import { MarkdownBody } from "../components/MarkdownBody";
 import { typeLabel, typeIcon, defaultTypeIcon, ApprovalPayloadRenderer } from "../components/ApprovalPayload";
+import { Identity } from "../components/Identity";
 import { PageSkeleton } from "../components/PageSkeleton";
+import { StatusBadge } from "../components/StatusBadge";
+import { useBreadcrumbs } from "../context/BreadcrumbContext";
+import { useCompany } from "../context/CompanyContext";
+import { queryKeys } from "../lib/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { CheckCircle2, ChevronRight, Sparkles } from "lucide-react";
-import type { ApprovalComment } from "@orchestorai/shared";
-import { MarkdownBody } from "../components/MarkdownBody";
+
+function HostCommandRequestPanel({
+  request,
+  isLoading,
+  onRevokeAllowlist,
+  isRevokingAllowlist,
+}: {
+  request: HostCommandRequestDetail | undefined;
+  isLoading: boolean;
+  onRevokeAllowlist: () => void;
+  isRevokingAllowlist: boolean;
+}) {
+  if (isLoading) {
+    return (
+      <div className="border border-border rounded-lg p-4">
+        <p className="text-sm text-muted-foreground">Loading host command request details...</p>
+      </div>
+    );
+  }
+
+  if (!request) {
+    return (
+      <div className="border border-border rounded-lg p-4">
+        <p className="text-sm text-muted-foreground">Host command request details are unavailable.</p>
+      </div>
+    );
+  }
+
+  const commandText = [request.binary, ...request.args].join(" ").trim();
+
+  return (
+    <div className="border border-border rounded-lg p-4 space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-medium">Host Command Request</h3>
+          <p className="text-xs text-muted-foreground font-mono">{request.id}</p>
+        </div>
+        <StatusBadge status={request.status} />
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">Command</p>
+          <p className="text-xs font-mono rounded-md bg-muted/40 px-2 py-1 break-all">{commandText}</p>
+        </div>
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">Working directory</p>
+          <p className="text-xs font-mono rounded-md bg-muted/40 px-2 py-1 break-all">{request.cwd}</p>
+        </div>
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">Linked issue</p>
+          <p className="text-sm">
+            {request.issueIdentifier ? `${request.issueIdentifier} ` : ""}
+            {request.issueTitle ?? request.issueId}
+          </p>
+        </div>
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">Approval thread</p>
+          {request.approvalThread ? (
+            <p className="text-xs font-mono rounded-md bg-muted/40 px-2 py-1 break-all">
+              {request.approvalThread.channelId} / {request.approvalThread.threadTs}
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">Inbox only or Slack thread not posted.</p>
+          )}
+        </div>
+        <div className="space-y-1 sm:col-span-2">
+          <p className="text-xs text-muted-foreground">Reason</p>
+          <p className="text-sm">{request.reason}</p>
+        </div>
+      </div>
+
+      {request.missingCommand && (
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">Missing command</p>
+          <p className="text-xs font-mono rounded-md bg-muted/40 px-2 py-1 inline-block">
+            {request.missingCommand}
+          </p>
+        </div>
+      )}
+
+      {request.localErrorExcerpt && (
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">Local failure excerpt</p>
+          <pre className="text-xs bg-muted/40 rounded-md p-3 overflow-x-auto whitespace-pre-wrap">
+            {request.localErrorExcerpt}
+          </pre>
+        </div>
+      )}
+
+      {request.stdoutExcerpt && (
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">Stdout excerpt</p>
+          <pre className="text-xs bg-muted/40 rounded-md p-3 overflow-x-auto whitespace-pre-wrap">
+            {request.stdoutExcerpt}
+          </pre>
+        </div>
+      )}
+
+      {request.stderrExcerpt && (
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">Stderr excerpt</p>
+          <pre className="text-xs bg-muted/40 rounded-md p-3 overflow-x-auto whitespace-pre-wrap">
+            {request.stderrExcerpt}
+          </pre>
+        </div>
+      )}
+
+      <div className="rounded-md border border-border/60 p-3 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="text-xs text-muted-foreground">Allowlist</p>
+            <p className="text-sm">
+              {request.allowlistEntry
+                ? "Active for this project and binary."
+                : "No active project allowlist entry."}
+            </p>
+          </div>
+          {request.allowlistEntry && !request.allowlistEntry.revokedAt && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-destructive border-destructive/40"
+              onClick={onRevokeAllowlist}
+              disabled={isRevokingAllowlist}
+            >
+              {isRevokingAllowlist ? "Revoking..." : "Revoke allowlist"}
+            </Button>
+          )}
+        </div>
+        {request.allowlistEntry && (
+          <p className="text-xs text-muted-foreground font-mono break-all">
+            {request.allowlistEntry.projectId} / {request.allowlistEntry.binary}
+          </p>
+        )}
+      </div>
+
+      {(request.logStore || request.logRef || request.startedAt || request.finishedAt) && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">Started</p>
+            <p className="text-sm">{request.startedAt ? new Date(request.startedAt).toLocaleString() : "—"}</p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">Finished</p>
+            <p className="text-sm">{request.finishedAt ? new Date(request.finishedAt).toLocaleString() : "—"}</p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">Log store</p>
+            <p className="text-xs font-mono break-all">{request.logStore ?? "—"}</p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">Log reference</p>
+            <p className="text-xs font-mono break-all">{request.logRef ?? "—"}</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function ApprovalDetail() {
   const { approvalId } = useParams<{ approvalId: string }>();
@@ -33,6 +194,10 @@ export function ApprovalDetail() {
     enabled: !!approvalId,
   });
   const resolvedCompanyId = approval?.companyId ?? selectedCompanyId;
+  const payload = (approval?.payload ?? {}) as Record<string, unknown>;
+  const isHostCommandApproval = approval?.type === "host_command_fallback";
+  const hostCommandRequestId =
+    isHostCommandApproval && typeof payload.requestId === "string" ? payload.requestId : null;
 
   const { data: comments } = useQuery({
     queryKey: queryKeys.approvals.comments(approvalId!),
@@ -50,6 +215,12 @@ export function ApprovalDetail() {
     queryKey: queryKeys.agents.list(resolvedCompanyId ?? ""),
     queryFn: () => agentsApi.list(resolvedCompanyId ?? ""),
     enabled: !!resolvedCompanyId,
+  });
+
+  const { data: hostCommandRequest, isLoading: isHostCommandRequestLoading } = useQuery({
+    queryKey: queryKeys.hostCommand.detail(hostCommandRequestId ?? ""),
+    queryFn: () => hostCommandFallbacksApi.get(hostCommandRequestId!),
+    enabled: !!hostCommandRequestId,
   });
 
   useEffect(() => {
@@ -75,17 +246,22 @@ export function ApprovalDetail() {
     queryClient.invalidateQueries({ queryKey: queryKeys.approvals.detail(approvalId) });
     queryClient.invalidateQueries({ queryKey: queryKeys.approvals.comments(approvalId) });
     queryClient.invalidateQueries({ queryKey: queryKeys.approvals.issues(approvalId) });
+    if (hostCommandRequestId) {
+      queryClient.invalidateQueries({ queryKey: queryKeys.hostCommand.detail(hostCommandRequestId) });
+    }
     if (approval?.companyId) {
       queryClient.invalidateQueries({ queryKey: queryKeys.approvals.list(approval.companyId) });
       queryClient.invalidateQueries({
         queryKey: queryKeys.approvals.list(approval.companyId, "pending"),
       });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(approval.companyId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.hostCommand.allowlist(approval.companyId) });
     }
   };
 
   const approveMutation = useMutation({
-    mutationFn: () => approvalsApi.approve(approvalId!),
+    mutationFn: (resolutionMode?: "once" | "always") =>
+      approvalsApi.approve(approvalId!, undefined, resolutionMode),
     onSuccess: () => {
       setError(null);
       refresh();
@@ -141,10 +317,18 @@ export function ApprovalDetail() {
     onError: (err) => setError(err instanceof Error ? err.message : "Delete failed"),
   });
 
+  const revokeAllowlistMutation = useMutation({
+    mutationFn: (entryId: string) => hostCommandFallbacksApi.revokeAllowlist(entryId),
+    onSuccess: () => {
+      setError(null);
+      refresh();
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : "Allowlist revoke failed"),
+  });
+
   if (isLoading) return <PageSkeleton variant="detail" />;
   if (!approval) return <p className="text-sm text-muted-foreground">Approval not found.</p>;
 
-  const payload = approval.payload as Record<string, unknown>;
   const linkedAgentId = typeof payload.agentId === "string" ? payload.agentId : null;
   const isActionable = approval.status === "pending" || approval.status === "revision_requested";
   const TypeIcon = typeIcon[approval.type] ?? defaultTypeIcon;
@@ -182,7 +366,9 @@ export function ApprovalDetail() {
               <div>
                 <p className="text-sm text-green-800 dark:text-green-100 font-medium">Approval confirmed</p>
                 <p className="text-xs text-green-700 dark:text-green-200/90">
-                  Requesting agent was notified to review this approval and linked issues.
+                  {isHostCommandApproval
+                    ? "Host execution was queued. The requesting agent will be resumed after the command finishes."
+                    : "Requesting agent was notified to review this approval and linked issues."}
                 </p>
               </div>
             </div>
@@ -197,6 +383,7 @@ export function ApprovalDetail() {
           </div>
         </div>
       )}
+
       <div className="border border-border rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -208,6 +395,7 @@ export function ApprovalDetail() {
           </div>
           <StatusBadge status={approval.status} />
         </div>
+
         <div className="text-sm space-y-1">
           {approval.requestedByAgentId && (
             <div className="flex items-center gap-2">
@@ -222,7 +410,7 @@ export function ApprovalDetail() {
           <button
             type="button"
             className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors mt-2"
-            onClick={() => setShowRawPayload((v) => !v)}
+            onClick={() => setShowRawPayload((value) => !value)}
           >
             <ChevronRight className={`h-3 w-3 transition-transform ${showRawPayload ? "rotate-90" : ""}`} />
             See full request
@@ -236,7 +424,9 @@ export function ApprovalDetail() {
             <p className="text-xs text-muted-foreground">Decision note: {approval.decisionNote}</p>
           )}
         </div>
+
         {error && <p className="text-sm text-destructive">{error}</p>}
+
         {linkedIssues && linkedIssues.length > 0 && (
           <div className="pt-2 border-t border-border/60">
             <p className="text-xs text-muted-foreground mb-1.5">Linked Issues</p>
@@ -259,14 +449,44 @@ export function ApprovalDetail() {
             </p>
           </div>
         )}
+
         <div className="flex flex-wrap items-center gap-2">
-          {isActionable && (
+          {isActionable && isHostCommandApproval && (
             <>
               <Button
                 size="sm"
                 className="bg-green-700 hover:bg-green-600 text-white"
-                onClick={() => approveMutation.mutate()}
-                disabled={approveMutation.isPending}
+                onClick={() => approveMutation.mutate("once")}
+                disabled={approveMutation.isPending || rejectMutation.isPending}
+              >
+                Approve Once
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => approveMutation.mutate("always")}
+                disabled={approveMutation.isPending || rejectMutation.isPending}
+              >
+                Approve Always
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => rejectMutation.mutate()}
+                disabled={approveMutation.isPending || rejectMutation.isPending}
+              >
+                Reject
+              </Button>
+            </>
+          )}
+
+          {isActionable && !isHostCommandApproval && (
+            <>
+              <Button
+                size="sm"
+                className="bg-green-700 hover:bg-green-600 text-white"
+                onClick={() => approveMutation.mutate(undefined)}
+                disabled={approveMutation.isPending || rejectMutation.isPending}
               >
                 Approve
               </Button>
@@ -274,13 +494,14 @@ export function ApprovalDetail() {
                 variant="destructive"
                 size="sm"
                 onClick={() => rejectMutation.mutate()}
-                disabled={rejectMutation.isPending}
+                disabled={approveMutation.isPending || rejectMutation.isPending}
               >
                 Reject
               </Button>
             </>
           )}
-          {approval.status === "pending" && (
+
+          {approval.status === "pending" && !isHostCommandApproval && (
             <Button
               size="sm"
               variant="outline"
@@ -290,7 +511,7 @@ export function ApprovalDetail() {
               Request revision
             </Button>
           )}
-          {approval.status === "revision_requested" && (
+          {approval.status === "revision_requested" && !isHostCommandApproval && (
             <Button
               size="sm"
               variant="outline"
@@ -316,6 +537,18 @@ export function ApprovalDetail() {
           )}
         </div>
       </div>
+
+      {isHostCommandApproval && (
+        <HostCommandRequestPanel
+          request={hostCommandRequest}
+          isLoading={isHostCommandRequestLoading}
+          onRevokeAllowlist={() => {
+            if (!hostCommandRequest?.allowlistEntry) return;
+            revokeAllowlistMutation.mutate(hostCommandRequest.allowlistEntry.id);
+          }}
+          isRevokingAllowlist={revokeAllowlistMutation.isPending}
+        />
+      )}
 
       <div className="border border-border rounded-lg p-4 space-y-3">
         <h3 className="text-sm font-medium">Comments ({comments?.length ?? 0})</h3>
@@ -353,7 +586,7 @@ export function ApprovalDetail() {
             onClick={() => addCommentMutation.mutate()}
             disabled={!commentBody.trim() || addCommentMutation.isPending}
           >
-            {addCommentMutation.isPending ? "Posting…" : "Post comment"}
+            {addCommentMutation.isPending ? "Posting..." : "Post comment"}
           </Button>
         </div>
       </div>

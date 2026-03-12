@@ -315,6 +315,23 @@ Codex emits JSONL events. Parse line-by-line and extract:
 
 Codex JSONL currently may not include cost; store token usage and leave cost null/unknown unless available.
 
+### Local host-command fallback
+
+When a local CLI agent hits an exact missing-command failure for an allowlist-eligible binary, it should not blindly retry through a host shell. Instead it should submit an explicit `host_command_fallback` request with:
+
+- linked `issueId`
+- bare `binary` name
+- exact argv array
+- absolute `cwd`
+- reason plus local error excerpt
+
+The server owns the privileged execution path. It either:
+
+1. queues the request immediately if the `(project, binary)` allowlist is already active, or
+2. creates an approval and waits for board resolution before executing on the host with `shell: false`
+
+This keeps normal `codex_local` runs constrained while still allowing narrow host-native recovery for toolchains such as `swift` and `xcodebuild`.
+
 ## 7.3 Common local adapter process handling
 
 Both local adapters must:

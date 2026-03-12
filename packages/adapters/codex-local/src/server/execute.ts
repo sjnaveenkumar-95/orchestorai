@@ -141,6 +141,11 @@ function renderOrchestorAIHeartbeatBrief(params: {
   workspaceRepoUrl: string;
   workspaceRepoRef: string;
 }): string {
+  const hostCommandFallbackUrl =
+    typeof params.env.ORCHESTORAI_HOST_COMMAND_FALLBACK_URL === "string" &&
+    params.env.ORCHESTORAI_HOST_COMMAND_FALLBACK_URL.trim().length > 0
+      ? params.env.ORCHESTORAI_HOST_COMMAND_FALLBACK_URL.trim()
+      : null;
   const lines = [
     "OrchestorAI heartbeat directive:",
     "This run was started by OrchestorAI. It is not a generic chat session and not a cold-start bootstrap.",
@@ -178,6 +183,13 @@ function renderOrchestorAIHeartbeatBrief(params: {
   lines.push("", "Execution requirements:");
   lines.push("- Start with OrchestorAI identity/context and assignment handling, then checkout or respond through OrchestorAI before doing any other work.");
   lines.push("- Use OrchestorAI APIs for identity lookup, assignment lookup, checkout, comments, and status updates.");
+  if (hostCommandFallbackUrl) {
+    lines.push("- If a required bare binary fails with exact `command not found` or ENOENT in this local runtime, do not stop at reporting the blocker.");
+    lines.push("- Immediately request a host command fallback through ORCHESTORAI_HOST_COMMAND_FALLBACK_URL using the same binary, args, cwd, issue ID, and first local error line, then wait for approval or result instead of retrying locally.");
+    lines.push(`- Host command fallback endpoint for this run: ${hostCommandFallbackUrl}`);
+    lines.push("- Request body fields: issueId, binary, args, cwd, reason, missingCommand, localErrorExcerpt.");
+    lines.push("- Only request fallback for the exact missing binary you attempted. Do not wrap commands in sh/bash/zsh or request sudo/ssh/osascript.");
+  }
   if (params.agentHome) {
     lines.push(`- Use ORCHESTORAI_AGENT_HOME=${params.agentHome} as the effective agent home for this run. If shell AGENT_HOME differs, ignore the shell value and do not spend a turn re-resolving it.`);
   }
@@ -308,6 +320,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   }
   if (!hasExplicitApiKey && authToken) {
     env.ORCHESTORAI_API_KEY = authToken;
+  }
+  if (env.ORCHESTORAI_API_URL) {
+    const apiBase = env.ORCHESTORAI_API_URL.replace(/\/+$/, "");
+    env.ORCHESTORAI_HOST_COMMAND_FALLBACK_URL =
+      `${apiBase}/api/companies/${agent.companyId}/host-command-fallbacks`;
   }
   const inferredAgentHome = instructionsFilePath
     ? await detectAgentHomeFromInstructionsFilePath(instructionsFilePath)

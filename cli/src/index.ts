@@ -13,6 +13,7 @@ import { registerCompanyCommands } from "./commands/client/company.js";
 import { registerIssueCommands } from "./commands/client/issue.js";
 import { registerAgentCommands } from "./commands/client/agent.js";
 import { registerApprovalCommands } from "./commands/client/approval.js";
+import { registerHostCommandCommands } from "./commands/client/host-command.js";
 import { registerActivityCommands } from "./commands/client/activity.js";
 import { registerDashboardCommands } from "./commands/client/dashboard.js";
 import { applyDataDirOverride, type DataDirOptionLike } from "./config/data-dir.js";
@@ -131,6 +132,7 @@ registerCompanyCommands(program);
 registerIssueCommands(program);
 registerAgentCommands(program);
 registerApprovalCommands(program);
+registerHostCommandCommands(program);
 registerActivityCommands(program);
 registerDashboardCommands(program);
 

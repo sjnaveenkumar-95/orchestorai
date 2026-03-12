@@ -12,6 +12,8 @@ import { Tabs } from "@/components/ui/tabs";
 import { ShieldCheck } from "lucide-react";
 import { ApprovalCard } from "../components/ApprovalCard";
 import { PageSkeleton } from "../components/PageSkeleton";
+import { Button } from "@/components/ui/button";
+import type { ApprovalResolutionMode } from "@orchestorai/shared";
 
 type StatusFilter = "pending" | "all";
 
@@ -42,11 +44,17 @@ export function Approvals() {
   });
 
   const approveMutation = useMutation({
-    mutationFn: (id: string) => approvalsApi.approve(id),
+    mutationFn: ({
+      id,
+      resolutionMode,
+    }: {
+      id: string;
+      resolutionMode?: ApprovalResolutionMode;
+    }) => approvalsApi.approve(id, undefined, resolutionMode),
     onSuccess: (_approval, id) => {
       setActionError(null);
       queryClient.invalidateQueries({ queryKey: queryKeys.approvals.list(selectedCompanyId!) });
-      navigate(`/approvals/${id}?resolved=approved`);
+      navigate(`/approvals/${id.id}?resolved=approved`);
     },
     onError: (err) => {
       setActionError(err instanceof Error ? err.message : "Failed to approve");
@@ -73,6 +81,60 @@ export function Approvals() {
   const pendingCount = (data ?? []).filter(
     (a) => a.status === "pending" || a.status === "revision_requested",
   ).length;
+
+  function renderApprovalActions(approvalId: string, approvalType: string) {
+    if (approvalType === "host_command_fallback") {
+      return (
+        <>
+          <Button
+            size="sm"
+            className="bg-green-700 hover:bg-green-600 text-white"
+            onClick={() => approveMutation.mutate({ id: approvalId, resolutionMode: "once" })}
+            disabled={approveMutation.isPending || rejectMutation.isPending}
+          >
+            Approve Once
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => approveMutation.mutate({ id: approvalId, resolutionMode: "always" })}
+            disabled={approveMutation.isPending || rejectMutation.isPending}
+          >
+            Approve Always
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => rejectMutation.mutate(approvalId)}
+            disabled={approveMutation.isPending || rejectMutation.isPending}
+          >
+            Reject
+          </Button>
+        </>
+      );
+    }
+
+    return (
+      <>
+        <Button
+          size="sm"
+          className="bg-green-700 hover:bg-green-600 text-white"
+          onClick={() => approveMutation.mutate({ id: approvalId })}
+          disabled={approveMutation.isPending || rejectMutation.isPending}
+        >
+          Approve
+        </Button>
+        <Button
+          variant="destructive"
+          size="sm"
+          onClick={() => rejectMutation.mutate(approvalId)}
+          disabled={approveMutation.isPending || rejectMutation.isPending}
+        >
+          Reject
+        </Button>
+      </>
+    );
+  }
 
   if (!selectedCompanyId) {
     return <p className="text-sm text-muted-foreground">Select a company first.</p>;
@@ -119,8 +181,7 @@ export function Approvals() {
               key={approval.id}
               approval={approval}
               requesterAgent={approval.requestedByAgentId ? (agents ?? []).find((a) => a.id === approval.requestedByAgentId) ?? null : null}
-              onApprove={() => approveMutation.mutate(approval.id)}
-              onReject={() => rejectMutation.mutate(approval.id)}
+              actions={renderApprovalActions(approval.id, approval.type)}
               detailLink={`/approvals/${approval.id}`}
               isPending={approveMutation.isPending || rejectMutation.isPending}
             />

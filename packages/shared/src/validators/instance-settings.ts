@@ -7,6 +7,7 @@ export const updateInstanceRuntimeSettingsSchema = z
   .object({
     authPublicBaseUrl: z.string().trim().url().max(2048).optional(),
     slackDefaultChannelMemberIds: runtimeValueSchema.optional(),
+    slackBoardApproverUserIds: runtimeValueSchema.optional(),
     slackBotToken: runtimeSecretValueSchema.optional(),
     slackAppToken: runtimeSecretValueSchema.optional(),
     slackManifestToken: runtimeSecretValueSchema.optional(),
@@ -18,6 +19,7 @@ export const updateInstanceRuntimeSettingsSchema = z
       Boolean(
         value.authPublicBaseUrl ||
         value.slackDefaultChannelMemberIds ||
+        value.slackBoardApproverUserIds ||
         value.slackBotToken ||
         value.slackAppToken ||
         value.slackManifestToken ||

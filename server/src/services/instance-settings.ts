@@ -15,7 +15,10 @@ type RuntimeSecretField =
   | "slackSigningSecret"
   | "betterAuthSecret";
 
-type RuntimeValueField = "authPublicBaseUrl" | "slackDefaultChannelMemberIds";
+type RuntimeValueField =
+  | "authPublicBaseUrl"
+  | "slackDefaultChannelMemberIds"
+  | "slackBoardApproverUserIds";
 
 const RUNTIME_SECRET_KEYS: Record<RuntimeSecretField, string> = {
   slackBotToken: "SLACK_BOT_TOKEN",
@@ -28,10 +31,12 @@ const RUNTIME_SECRET_KEYS: Record<RuntimeSecretField, string> = {
 const RUNTIME_VALUE_KEYS: Record<RuntimeValueField, string> = {
   authPublicBaseUrl: "ORCHESTORAI_AUTH_PUBLIC_BASE_URL",
   slackDefaultChannelMemberIds: "SLACK_DEFAULT_CHANNEL_MEMBER_IDS",
+  slackBoardApproverUserIds: "SLACK_BOARD_APPROVER_USER_IDS",
 };
 
 const AUTH_PUBLIC_BASE_URL_ENV_KEY = RUNTIME_VALUE_KEYS.authPublicBaseUrl;
 const SLACK_DEFAULT_CHANNEL_MEMBER_IDS_ENV_KEY = RUNTIME_VALUE_KEYS.slackDefaultChannelMemberIds;
+const SLACK_BOARD_APPROVER_USER_IDS_ENV_KEY = RUNTIME_VALUE_KEYS.slackBoardApproverUserIds;
 
 function isNonEmpty(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
@@ -162,6 +167,27 @@ function resolveSimpleValueStatus(
   };
 }
 
+function resolveSlackBoardApproverUserIdsStatus(
+  envEntries: Record<string, string>,
+): InstanceRuntimeValueStatus {
+  const direct = resolveSimpleValueStatus(envEntries, SLACK_BOARD_APPROVER_USER_IDS_ENV_KEY);
+  if (direct.configured) {
+    return direct;
+  }
+
+  const fallback = resolveSimpleValueStatus(envEntries, SLACK_DEFAULT_CHANNEL_MEMBER_IDS_ENV_KEY);
+  if (fallback.configured) {
+    return {
+      envKey: SLACK_BOARD_APPROVER_USER_IDS_ENV_KEY,
+      configured: true,
+      value: fallback.value,
+      source: fallback.source,
+    };
+  }
+
+  return direct;
+}
+
 function resolveRuntimeSecretValue(
   envEntries: Record<string, string>,
   field: RuntimeSecretField,
@@ -203,6 +229,16 @@ function resolveRuntimeValue(
     return null;
   }
 
+  if (field === "slackBoardApproverUserIds") {
+    const directValue = resolveSimpleValueStatus(envEntries, SLACK_BOARD_APPROVER_USER_IDS_ENV_KEY);
+    if (directValue.configured) {
+      return directValue.value;
+    }
+
+    const fallbackValue = resolveSimpleValueStatus(envEntries, SLACK_DEFAULT_CHANNEL_MEMBER_IDS_ENV_KEY);
+    return fallbackValue.configured ? fallbackValue.value : null;
+  }
+
   const envKey = RUNTIME_VALUE_KEYS[field];
   const fileValue = envEntries[envKey];
   if (isNonEmpty(fileValue)) {
@@ -230,6 +266,7 @@ export function createInstanceSettingsService(options: { envFilePath?: string } 
         envEntries,
         SLACK_DEFAULT_CHANNEL_MEMBER_IDS_ENV_KEY,
       ),
+      slackBoardApproverUserIds: resolveSlackBoardApproverUserIdsStatus(envEntries),
       secrets: {
         slackBotToken: resolveSecretStatus(envEntries, "slackBotToken"),
         slackAppToken: resolveSecretStatus(envEntries, "slackAppToken"),
@@ -249,6 +286,10 @@ export function createInstanceSettingsService(options: { envFilePath?: string } 
 
     if (isNonEmpty(input.slackDefaultChannelMemberIds)) {
       nextEntries[SLACK_DEFAULT_CHANNEL_MEMBER_IDS_ENV_KEY] = input.slackDefaultChannelMemberIds.trim();
+    }
+
+    if (isNonEmpty(input.slackBoardApproverUserIds)) {
+      nextEntries[SLACK_BOARD_APPROVER_USER_IDS_ENV_KEY] = input.slackBoardApproverUserIds.trim();
     }
 
     for (const [field, envKey] of Object.entries(RUNTIME_SECRET_KEYS) as [RuntimeSecretField, string][]) {

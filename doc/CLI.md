@@ -3,7 +3,7 @@
 OrchestorAI CLI now supports both:
 
 - instance setup/diagnostics (`onboard`, `doctor`, `configure`, `env`, `allowed-hostname`)
-- control-plane client operations (issues, approvals, agents, activity, dashboard)
+- control-plane client operations (issues, approvals, host-command fallbacks, agents, activity, dashboard)
 
 ## Base Usage
 
@@ -124,12 +124,28 @@ pnpm orchestorai agent get <agent-id>
 pnpm orchestorai approval list --company-id <company-id> [--status pending]
 pnpm orchestorai approval get <approval-id>
 pnpm orchestorai approval create --company-id <company-id> --type hire_agent --payload '{"name":"..."}' [--issue-ids <id1,id2>]
-pnpm orchestorai approval approve <approval-id> [--decision-note "..."]
+pnpm orchestorai approval approve <approval-id> [--decision-note "..."] [--resolution-mode once|always]
 pnpm orchestorai approval reject <approval-id> [--decision-note "..."]
 pnpm orchestorai approval request-revision <approval-id> [--decision-note "..."]
 pnpm orchestorai approval resubmit <approval-id> [--payload '{"...":"..."}']
 pnpm orchestorai approval comment <approval-id> --body "..."
 ```
+
+For `host_command_fallback` approvals:
+
+- `--resolution-mode once` approves only the current host execution request
+- `--resolution-mode always` also creates or refreshes the project-scoped binary allowlist entry
+
+## Host Command Commands
+
+```sh
+pnpm orchestorai host-command request --company-id <company-id> --issue-id <issue-id> --cwd /absolute/path --reason "..." [--missing-command swift] [--local-error-excerpt "..."] <binary> [args...]
+pnpm orchestorai host-command get <request-id>
+pnpm orchestorai host-command allowlist list --company-id <company-id>
+pnpm orchestorai host-command allowlist revoke <entry-id>
+```
+
+These commands are for explicit host fallback requests created by local agents after an exact missing-command failure.
 
 ## Activity Commands
 

@@ -95,6 +95,10 @@ export {
   type ResubmitApproval,
   type AddApprovalComment,
 } from "./approval.js";
+export {
+  createHostCommandFallbackSchema,
+  type CreateHostCommandFallback,
+} from "./host-command.js";
 
 export {
   envBindingPlainSchema,

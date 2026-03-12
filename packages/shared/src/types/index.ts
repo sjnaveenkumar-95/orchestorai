@@ -23,6 +23,7 @@ export type {
   ProjectSlackMembership,
   ProjectSlackMembershipState,
   ProjectSlackState,
+  SlackApprovalThreadLink,
   SlackThreadLink,
 } from "./slack.js";
 export type {
@@ -37,6 +38,13 @@ export type {
 } from "./issue.js";
 export type { Goal } from "./goal.js";
 export type { Approval, ApprovalComment } from "./approval.js";
+export type {
+  HostCommandAllowlistEntry,
+  HostCommandFallbackApprovalPayload,
+  HostCommandRequest,
+  HostCommandRequestDetail,
+  CreateHostCommandFallbackResult,
+} from "./host-command.js";
 export type {
   SecretProvider,
   SecretVersionSelector,

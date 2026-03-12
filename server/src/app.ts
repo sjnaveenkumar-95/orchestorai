@@ -16,6 +16,7 @@ import { projectRoutes } from "./routes/projects.js";
 import { issueRoutes } from "./routes/issues.js";
 import { goalRoutes } from "./routes/goals.js";
 import { approvalRoutes } from "./routes/approvals.js";
+import { hostCommandFallbackRoutes } from "./routes/host-command-fallbacks.js";
 import { secretRoutes } from "./routes/secrets.js";
 import { costRoutes } from "./routes/costs.js";
 import { activityRoutes } from "./routes/activity.js";
@@ -47,7 +48,10 @@ export async function createApp(
 ) {
   const app = express();
 
-  app.use("/api/slack/control/events", express.raw({ type: "application/json" }));
+  app.use(
+    ["/api/slack/control/events", "/api/slack/control/approval-thread-replies"],
+    express.raw({ type: "application/json" }),
+  );
   app.use(express.json());
   app.use(httpLogger);
   const privateHostnameGateEnabled =
@@ -109,6 +113,7 @@ export async function createApp(
   api.use(assetRoutes(db, opts.storageService));
   api.use(projectRoutes(db));
   api.use(issueRoutes(db, opts.storageService));
+  api.use(hostCommandFallbackRoutes(db));
   api.use(goalRoutes(db));
   api.use(approvalRoutes(db));
   api.use(secretRoutes(db));

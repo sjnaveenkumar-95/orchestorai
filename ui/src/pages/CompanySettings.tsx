@@ -59,6 +59,7 @@ export function CompanySettings() {
   const [slackSigningSecret, setSlackSigningSecret] = useState("");
   const [authPublicBaseUrl, setAuthPublicBaseUrl] = useState("");
   const [slackDefaultChannelMemberIds, setSlackDefaultChannelMemberIds] = useState("");
+  const [slackBoardApproverUserIds, setSlackBoardApproverUserIds] = useState("");
   const [betterAuthSecret, setBetterAuthSecret] = useState("");
 
   const generalDirty =
@@ -160,6 +161,7 @@ export function CompanySettings() {
       setSlackSigningSecret("");
       setAuthPublicBaseUrl("");
       setSlackDefaultChannelMemberIds("");
+      setSlackBoardApproverUserIds("");
       setBetterAuthSecret("");
     }
   });
@@ -217,6 +219,7 @@ export function CompanySettings() {
   const runtimeDirty =
     authPublicBaseUrl.trim().length > 0 ||
     slackDefaultChannelMemberIds.trim().length > 0 ||
+    slackBoardApproverUserIds.trim().length > 0 ||
     slackBotToken.trim().length > 0 ||
     slackAppToken.trim().length > 0 ||
     slackManifestToken.trim().length > 0 ||
@@ -230,6 +233,9 @@ export function CompanySettings() {
     }
     if (slackDefaultChannelMemberIds.trim()) {
       data.slackDefaultChannelMemberIds = slackDefaultChannelMemberIds.trim();
+    }
+    if (slackBoardApproverUserIds.trim()) {
+      data.slackBoardApproverUserIds = slackBoardApproverUserIds.trim();
     }
     if (slackBotToken.trim()) {
       data.slackBotToken = slackBotToken.trim();
@@ -437,6 +443,27 @@ export function CompanySettings() {
               <p className="text-xs text-muted-foreground">
                 {describeRuntimeValue(
                   instanceSettingsQuery.data.slackDefaultChannelMemberIds
+                )}
+              </p>
+
+              <Field
+                label="SLACK_BOARD_APPROVER_USER_IDS"
+                hint="Comma-separated Slack user IDs allowed to approve or reject host command fallback requests from Slack threads. If unset, OrchestorAI falls back to SLACK_DEFAULT_CHANNEL_MEMBER_IDS."
+              >
+                <input
+                  className="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm font-mono outline-none"
+                  type="text"
+                  value={slackBoardApproverUserIds}
+                  placeholder={
+                    instanceSettingsQuery.data.slackBoardApproverUserIds.value ??
+                    "U01234567,U089ABCDE"
+                  }
+                  onChange={(e) => setSlackBoardApproverUserIds(e.target.value)}
+                />
+              </Field>
+              <p className="text-xs text-muted-foreground">
+                {describeRuntimeValue(
+                  instanceSettingsQuery.data.slackBoardApproverUserIds
                 )}
               </p>
 

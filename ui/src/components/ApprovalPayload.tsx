@@ -1,13 +1,15 @@
-import { UserPlus, Lightbulb, ShieldCheck } from "lucide-react";
+import { Lightbulb, ShieldCheck, Terminal, UserPlus } from "lucide-react";
 
 export const typeLabel: Record<string, string> = {
   hire_agent: "Hire Agent",
   approve_ceo_strategy: "CEO Strategy",
+  host_command_fallback: "Host Command Fallback",
 };
 
 export const typeIcon: Record<string, typeof UserPlus> = {
   hire_agent: UserPlus,
   approve_ceo_strategy: Lightbulb,
+  host_command_fallback: Terminal,
 };
 
 export const defaultTypeIcon = ShieldCheck;
@@ -69,7 +71,37 @@ export function CeoStrategyPayload({ payload }: { payload: Record<string, unknow
   );
 }
 
+export function HostCommandFallbackPayload({ payload }: { payload: Record<string, unknown> }) {
+  const binary = typeof payload.binary === "string" ? payload.binary : "—";
+  const args = Array.isArray(payload.args)
+    ? payload.args.filter((value): value is string => typeof value === "string")
+    : [];
+  const commandText = [binary, ...args].join(" ").trim();
+  const localErrorExcerpt =
+    typeof payload.localErrorExcerpt === "string" ? payload.localErrorExcerpt : null;
+
+  return (
+    <div className="mt-3 space-y-1.5 text-sm">
+      <div className="flex items-center gap-2">
+        <span className="text-muted-foreground w-20 sm:w-24 shrink-0 text-xs">Command</span>
+        <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">
+          {commandText || binary}
+        </span>
+      </div>
+      <PayloadField label="Cwd" value={payload.cwd} />
+      <PayloadField label="Reason" value={payload.reason} />
+      <PayloadField label="Missing" value={payload.missingCommand} />
+      {localErrorExcerpt && (
+        <div className="mt-2 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground whitespace-pre-wrap max-h-40 overflow-y-auto">
+          {localErrorExcerpt}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ApprovalPayloadRenderer({ type, payload }: { type: string; payload: Record<string, unknown> }) {
   if (type === "hire_agent") return <HireAgentPayload payload={payload} />;
+  if (type === "host_command_fallback") return <HostCommandFallbackPayload payload={payload} />;
   return <CeoStrategyPayload payload={payload} />;
 }
