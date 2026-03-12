@@ -1,0 +1,38 @@
+{
+  "name": "slack-agent-dm",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Reusable Slack DM bot package built on slack-agent-core",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./config": "./src/config.js",
+    "./runtime": "./src/runtime.js",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "slack-agent-dm": "./src/index.js",
+    "slack-agent-dm-pairing": "./src/pairing-cli.js"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "slack-agent.config.example.json"
+  ],
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/*.test.js",
+    "pairing:list": "node src/pairing-cli.js list",
+    "pairing:approve": "node src/pairing-cli.js approve"
+  },
+  "dependencies": {
+    "@slack/bolt": "^4.6.0",
+    "slack-agent-core": "workspace:*"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

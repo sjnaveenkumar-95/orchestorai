@@ -165,14 +165,31 @@ importers:
         specifier: ^5.7.3
         version: 5.9.3
 
+  packages/slack-agent-core: {}
+
+  packages/slack-agent-dm:
+    dependencies:
+      '@slack/bolt':
+        specifier: ^4.6.0
+        version: 4.6.0(@types/express@5.0.6)
+      slack-agent-core:
+        specifier: workspace:*
+        version: link:../slack-agent-core
+
   packages/slack-bot:
     dependencies:
+      '@orchestorai/slack-channel-bot':
+        specifier: workspace:*
+        version: link:../slack-channel-bot
       '@slack/bolt':
         specifier: ^4.6.0
         version: 4.6.0(@types/express@5.0.6)
       dotenv:
         specifier: ^17.3.1
         version: 17.3.1
+      slack-agent-core:
+        specifier: workspace:*
+        version: link:../slack-agent-core
 
   packages/slack-bridge:
     dependencies:
@@ -195,6 +212,18 @@ importers:
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
+
+  packages/slack-channel-bot:
+    dependencies:
+      '@slack/bolt':
+        specifier: ^4.6.0
+        version: 4.6.0(@types/express@5.0.6)
+      dotenv:
+        specifier: ^17.3.1
+        version: 17.3.1
+      slack-agent-core:
+        specifier: workspace:*
+        version: link:../slack-agent-core
 
   server:
     dependencies:

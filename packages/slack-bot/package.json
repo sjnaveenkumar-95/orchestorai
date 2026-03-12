@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "Slack + Codex bot with OrchestorAI task bridge",
+  "description": "Compatibility wrapper for the OrchestorAI Slack channel bot",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
@@ -14,6 +14,8 @@
   },
   "dependencies": {
     "@slack/bolt": "^4.6.0",
-    "dotenv": "^17.3.1"
+    "dotenv": "^17.3.1",
+    "slack-agent-core": "workspace:*",
+    "@orchestorai/slack-channel-bot": "workspace:*"
   }
 }

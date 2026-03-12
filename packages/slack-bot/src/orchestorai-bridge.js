@@ -16,6 +16,14 @@ function normalizeAgentName(value) {
     .toLowerCase();
 }
 
+function normalizeSlackUserId(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^slack:/i, "")
+    .replace(/^@+/, "")
+    .toLowerCase();
+}
+
 function escapeRegex(value) {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -299,6 +307,19 @@ function readEntityReferenceAliases(entity) {
   return uniqueStrings([primaryAlias, ...aliases].filter(Boolean));
 }
 
+function readAgentSlackUserIds(agent) {
+  const slack = asRecord(asRecord(agent?.metadata)?.slack);
+  return uniqueStrings([
+    agent?.slackBotUserId,
+    agent?.botUserId,
+    asRecord(agent?.slack)?.botUserId,
+    slack?.botUserId,
+    ...(Array.isArray(slack?.userIds) ? slack.userIds : []),
+  ])
+    .map((value) => normalizeSlackUserId(value))
+    .filter(Boolean);
+}
+
 export function getPrimaryReferenceAlias(entity) {
   return readEntityReferenceAliases(entity)[0] || "";
 }
@@ -530,6 +551,175 @@ export function resolveAssignee({ text, agentMappings, agents }) {
   };
 }
 
+export function resolveAssigneeReference({ reference, agentMappings, agents }) {
+  const slackNormalizedReference = collapseWhitespace(String(reference || "").replace(/<@([A-Z0-9]+)>/gi, "@$1"));
+  const rawReference = collapseWhitespace(stripSlackMentions(slackNormalizedReference));
+  if (!rawReference) {
+    return {
+      kind: "none",
+      reason: "empty_reference",
+    };
+  }
+
+  const trimmedReference = rawReference.replace(/^@+/, "").trim();
+  const mappingMatches = new Map();
+  const mappingMap = normalizeMappings(agentMappings);
+
+  for (const key of uniqueStrings([
+    rawReference,
+    rawReference.toLowerCase(),
+    trimmedReference,
+    trimmedReference.toLowerCase(),
+    `@${trimmedReference}`,
+    `@${trimmedReference.toLowerCase()}`,
+    `slack:${rawReference}`,
+    `slack:${rawReference.toLowerCase()}`,
+    `slack:${trimmedReference}`,
+    `slack:${trimmedReference.toLowerCase()}`,
+  ])) {
+    const matchedAgentId = mappingMap.get(String(key).toLowerCase());
+    if (!matchedAgentId) {
+      continue;
+    }
+    const agent = findAgentById(agents, matchedAgentId);
+    if (agent) {
+      mappingMatches.set(agent.id, {
+        agent,
+        matchedBy: key,
+        source: "mapping",
+      });
+    }
+  }
+
+  if (mappingMatches.size > 1) {
+    return {
+      kind: "ambiguous",
+      reason: "multiple_mapped_agents",
+      candidates: Array.from(mappingMatches.values()).map((entry) => entry.agent),
+    };
+  }
+  if (mappingMatches.size === 1) {
+    const match = Array.from(mappingMatches.values())[0];
+    return {
+      kind: "match",
+      agent: match.agent,
+      matchedBy: match.matchedBy,
+      source: match.source,
+    };
+  }
+
+  const slackUserIdMatches = new Map();
+  const normalizedSlackReference = normalizeSlackUserId(trimmedReference);
+  if (normalizedSlackReference) {
+    const matched = (agents || []).filter((agent) => readAgentSlackUserIds(agent).includes(normalizedSlackReference));
+    for (const agent of matched) {
+      slackUserIdMatches.set(agent.id, {
+        agent,
+        matchedBy: normalizedSlackReference,
+        source: "slack_bot_user_id",
+      });
+    }
+  }
+
+  if (slackUserIdMatches.size > 1) {
+    return {
+      kind: "ambiguous",
+      reason: "multiple_slack_user_agents",
+      candidates: Array.from(slackUserIdMatches.values()).map((entry) => entry.agent),
+    };
+  }
+  if (slackUserIdMatches.size === 1) {
+    const match = Array.from(slackUserIdMatches.values())[0];
+    return {
+      kind: "match",
+      agent: match.agent,
+      matchedBy: match.matchedBy,
+      source: match.source,
+    };
+  }
+
+  const aliasMatches = new Map();
+  const referenceAlias = slugifyLookupValue(trimmedReference);
+  if (referenceAlias) {
+    const matched = (agents || []).filter((agent) => readEntityReferenceAliases(agent).includes(referenceAlias));
+    for (const agent of matched) {
+      aliasMatches.set(agent.id, {
+        agent,
+        matchedBy: referenceAlias,
+        source: "agent_alias",
+      });
+    }
+  }
+
+  if (aliasMatches.size > 1) {
+    return {
+      kind: "ambiguous",
+      reason: "multiple_alias_agents",
+      candidates: Array.from(aliasMatches.values()).map((entry) => entry.agent),
+    };
+  }
+  if (aliasMatches.size === 1) {
+    const match = Array.from(aliasMatches.values())[0];
+    return {
+      kind: "match",
+      agent: match.agent,
+      matchedBy: match.matchedBy,
+      source: match.source,
+    };
+  }
+
+  const exactNameMatches = (agents || []).filter(
+    (agent) => normalizeAgentName(agent?.name) === normalizeAgentName(trimmedReference),
+  );
+  if (exactNameMatches.length > 1) {
+    return {
+      kind: "ambiguous",
+      reason: "multiple_named_agents",
+      candidates: exactNameMatches,
+    };
+  }
+  if (exactNameMatches.length === 1) {
+    return {
+      kind: "match",
+      agent: exactNameMatches[0],
+      matchedBy: exactNameMatches[0].name,
+      source: "agent_name",
+    };
+  }
+
+  const urlKeyMatches = new Map();
+  if (referenceAlias) {
+    const matched = (agents || []).filter(
+      (agent) => slugifyLookupValue(agent?.urlKey || "") === referenceAlias,
+    );
+    for (const agent of matched) {
+      urlKeyMatches.set(agent.id, agent);
+    }
+  }
+
+  if (urlKeyMatches.size > 1) {
+    return {
+      kind: "ambiguous",
+      reason: "multiple_url_key_agents",
+      candidates: Array.from(urlKeyMatches.values()),
+    };
+  }
+  if (urlKeyMatches.size === 1) {
+    const agent = Array.from(urlKeyMatches.values())[0];
+    return {
+      kind: "match",
+      agent,
+      matchedBy: agent.urlKey || agent.name,
+      source: "agent_url_key",
+    };
+  }
+
+  return {
+    kind: "none",
+    reason: "no_matching_agent",
+  };
+}
+
 export function resolveProject({ text, projectMappings, projects }) {
   const selectors = extractProjectSelectors(text);
   if (selectors.length === 0) {
@@ -682,6 +872,160 @@ export function resolveProject({ text, projectMappings, projects }) {
       project,
       matchedBy: project.name,
       source: "project_name",
+      selectors,
+    };
+  }
+
+  return {
+    kind: "none",
+    reason: "no_matching_project",
+    selectors,
+  };
+}
+
+export function resolveProjectReference({ reference, projectMappings, projects }) {
+  const rawReference = collapseWhitespace(String(reference || ""));
+  if (!rawReference) {
+    return {
+      kind: "none",
+      reason: "empty_reference",
+      selectors: [],
+    };
+  }
+
+  const trimmedReference = rawReference.replace(/^project\s*:\s*/i, "").trim();
+  const selectors = [trimmedReference];
+  const mappingMatches = new Map();
+  const mappingMap = normalizeMappings(projectMappings);
+
+  for (const key of uniqueStrings([
+    trimmedReference,
+    trimmedReference.toLowerCase(),
+    `project:${trimmedReference}`,
+    `project:${trimmedReference.toLowerCase()}`,
+    slugifyLookupValue(trimmedReference),
+    `project:${slugifyLookupValue(trimmedReference)}`,
+  ].filter(Boolean))) {
+    const matchedProjectId = mappingMap.get(String(key).toLowerCase());
+    if (!matchedProjectId) {
+      continue;
+    }
+    const project = findProjectById(projects, matchedProjectId);
+    if (project) {
+      mappingMatches.set(project.id, {
+        project,
+        matchedBy: key,
+        source: "mapping",
+      });
+    }
+  }
+
+  if (mappingMatches.size > 1) {
+    return {
+      kind: "ambiguous",
+      reason: "multiple_mapped_projects",
+      selectors,
+      candidates: Array.from(mappingMatches.values()).map((entry) => entry.project),
+    };
+  }
+  if (mappingMatches.size === 1) {
+    const match = Array.from(mappingMatches.values())[0];
+    return {
+      kind: "match",
+      project: match.project,
+      matchedBy: match.matchedBy,
+      source: match.source,
+      selectors,
+    };
+  }
+
+  const referenceAlias = slugifyLookupValue(trimmedReference);
+  const aliasMatches = new Map();
+  if (referenceAlias) {
+    const matched = (projects || []).filter((project) =>
+      readEntityReferenceAliases(project).includes(referenceAlias),
+    );
+    for (const project of matched) {
+      aliasMatches.set(project.id, {
+        project,
+        matchedBy: referenceAlias,
+        source: "project_alias",
+      });
+    }
+  }
+
+  if (aliasMatches.size > 1) {
+    return {
+      kind: "ambiguous",
+      reason: "multiple_alias_projects",
+      selectors,
+      candidates: Array.from(aliasMatches.values()).map((entry) => entry.project),
+    };
+  }
+  if (aliasMatches.size === 1) {
+    const match = Array.from(aliasMatches.values())[0];
+    return {
+      kind: "match",
+      project: match.project,
+      matchedBy: match.matchedBy,
+      source: match.source,
+      selectors,
+    };
+  }
+
+  const normalizedReference = normalizeProjectName(trimmedReference);
+  const exactMatches = (projects || []).filter((project) => {
+    const projectName = normalizeProjectName(project?.name);
+    const projectSlug = slugifyLookupValue(project?.name);
+    return (
+      (normalizedReference && projectName === normalizedReference) ||
+      (referenceAlias && projectSlug === referenceAlias)
+    );
+  });
+
+  if (exactMatches.length > 1) {
+    return {
+      kind: "ambiguous",
+      reason: "multiple_named_projects",
+      selectors,
+      candidates: exactMatches,
+    };
+  }
+  if (exactMatches.length === 1) {
+    return {
+      kind: "match",
+      project: exactMatches[0],
+      matchedBy: exactMatches[0].name,
+      source: "project_name",
+      selectors,
+    };
+  }
+
+  const urlKeyMatches = new Map();
+  if (referenceAlias) {
+    const matched = (projects || []).filter(
+      (project) => slugifyLookupValue(project?.urlKey || "") === referenceAlias,
+    );
+    for (const project of matched) {
+      urlKeyMatches.set(project.id, project);
+    }
+  }
+
+  if (urlKeyMatches.size > 1) {
+    return {
+      kind: "ambiguous",
+      reason: "multiple_url_key_projects",
+      selectors,
+      candidates: Array.from(urlKeyMatches.values()),
+    };
+  }
+  if (urlKeyMatches.size === 1) {
+    const project = Array.from(urlKeyMatches.values())[0];
+    return {
+      kind: "match",
+      project,
+      matchedBy: project.urlKey || project.name,
+      source: "project_url_key",
       selectors,
     };
   }

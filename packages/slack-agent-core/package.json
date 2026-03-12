@@ -1,0 +1,25 @@
+{
+  "name": "slack-agent-core",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Provider-neutral Slack agent runtime core",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./config": "./src/config.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

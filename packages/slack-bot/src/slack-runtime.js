@@ -5,6 +5,11 @@ import { handleSlackNativeAction } from "./slack-actions.js";
 import { OrchestorAIClient } from "./orchestorai-client.js";
 import { OrchestorAIThreadStore } from "./orchestorai-thread-store.js";
 import {
+  buildOrchestorAIActionInstructions,
+  extractOrchestorAIAction,
+} from "./orchestorai-action-protocol.js";
+import { resolveSlackBotCodexAdapter } from "./runtime-codex.js";
+import {
   detectOrchestorAICommentRequest,
   buildIssueDescription,
   detectOrchestorAISummaryRequest,
@@ -19,7 +24,9 @@ import {
   getPrimaryReferenceAlias,
   hasOrchestorAITrigger,
   resolveAssignee,
+  resolveAssigneeReference,
   resolveProject,
+  resolveProjectReference,
   stripBotMention,
 } from "./orchestorai-bridge.js";
 
@@ -397,6 +404,37 @@ export function buildOrchestorAILatestCommentSummary({
   return ["*Summary*", `${prefix}:`, body || "(empty comment)"].join("\n");
 }
 
+export function composeSlackReplyText({ replyText = "", actionSummary = "", hasOrchestorAIAction = false }) {
+  const baseReply = String(replyText || "").trim();
+  const summary = String(actionSummary || "").trim();
+  if (hasOrchestorAIAction) {
+    return summary || baseReply;
+  }
+  return [baseReply, summary].filter(Boolean).join("\n\n");
+}
+
+export function selectCreateIssueProjectReference({ channelType = "", channelName = "", actionProject = "" }) {
+  const normalizedChannelType = normalizeChannelType(channelType);
+  const normalizedChannelName = String(channelName || "").trim();
+  if ((normalizedChannelType === "channel" || normalizedChannelType === "group") && normalizedChannelName) {
+    return {
+      reference: normalizedChannelName,
+      source: "channel",
+    };
+  }
+  const explicitProject = String(actionProject || "").trim();
+  if (explicitProject) {
+    return {
+      reference: explicitProject,
+      source: "action",
+    };
+  }
+  return {
+    reference: "",
+    source: "none",
+  };
+}
+
 function parseReplyTag(text) {
   const raw = String(text || "");
   const currentMatch = /\[\[reply_to_current\]\]/i.exec(raw);
@@ -608,6 +646,7 @@ export class SlackRuntime {
     this.config = params.config;
     this.configPath = params.configPath;
     this.codex = params.codex;
+    this.directMessageCodex = params.directMessageCodex || null;
 
     this.channelCache = new Map();
     this.userCache = new Map();
@@ -631,6 +670,7 @@ export class SlackRuntime {
       ? new OrchestorAIClient({
           apiUrl: this.config.orchestorai.apiUrl,
           companyId: this.config.orchestorai.companyId,
+          controlSigningSecret: this.config.slack.signingSecret,
           log: (level, message) => this.log(level, message),
         })
       : null;
@@ -675,6 +715,21 @@ export class SlackRuntime {
       console.log(prefix, message, meta);
     } else {
       console.log(prefix, message);
+    }
+  }
+
+  resolveCodexAdapter(channelType) {
+    return resolveSlackBotCodexAdapter({
+      channelType,
+      defaultAdapter: this.codex,
+      directMessageAdapter: this.directMessageCodex,
+    });
+  }
+
+  async ensureCodexReady() {
+    const adapters = Array.from(new Set([this.codex, this.directMessageCodex].filter(Boolean)));
+    for (const adapter of adapters) {
+      await adapter.ensureReady();
     }
   }
 
@@ -765,13 +820,11 @@ export class SlackRuntime {
       return;
     }
 
-    const text = String(event?.text || "");
-    const explicitOrchestorAITrigger = hasOrchestorAITrigger({
-      text,
-      botUserId: this.botUserId,
-      triggerMentions: this.config.orchestorai.triggerMentions,
-    });
-    if (explicitOrchestorAITrigger || this.isDirectBotMention(event, options)) {
+    if (
+      channelType === "channel" ||
+      channelType === "group" ||
+      this.isDirectBotMention(event, options)
+    ) {
       this.orchestoraiThreadStore.setPreferredChannel(this.config.orchestorai.companyId, channelId);
     }
   }
@@ -986,6 +1039,40 @@ export class SlackRuntime {
         : `OrchestorAI summary failed: ${reason}`;
       await this.postOrchestorAIThreadReply(event.channel, replyThreadTs, message);
       return true;
+    }
+  }
+
+  async maybeHandleOrchestorAIApprovalThreadReply({ event, channelType }) {
+    if (!this.orchestoraiClient) {
+      return false;
+    }
+    if (channelType !== "channel" && channelType !== "group") {
+      return false;
+    }
+    if (!isThreadReplyMessage(event)) {
+      return false;
+    }
+
+    try {
+      const result = await this.orchestoraiClient.handleSlackApprovalThreadReply({
+        channelId: event.channel,
+        threadTs: event.thread_ts,
+        slackUserId: event.user || "",
+        text: String(event.text || ""),
+      });
+      if (!result?.handled) {
+        return false;
+      }
+
+      this.log(
+        "info",
+        `orchestorai approval thread reply handled outcome=${result.outcome || "handled"} thread=${event.channel}:${event.thread_ts}`,
+      );
+      return true;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      this.log("warn", `orchestorai approval thread handoff failed: ${reason}`);
+      return false;
     }
   }
 
@@ -1834,6 +1921,11 @@ export class SlackRuntime {
       parts.push(`channel_purpose_untrusted=${params.channelPurpose}`);
     }
 
+    if (params.orchestoraiContextLines?.length > 0) {
+      parts.push("orchestorai_context:");
+      parts.push(params.orchestoraiContextLines.join("\n"));
+    }
+
     if (params.historyLines.length > 0) {
       parts.push("recent_history:");
       parts.push(params.historyLines.join("\n"));
@@ -1854,6 +1946,223 @@ export class SlackRuntime {
     return parts.join("\n");
   }
 
+  async renderSlackTextForCodex(text) {
+    const source = String(text || "");
+    if (!source) {
+      return "";
+    }
+
+    const mentionIds = Array.from(
+      new Set(Array.from(source.matchAll(/<@([A-Z0-9]+)>/gi)).map((match) => String(match[1] || "").trim())),
+    ).filter(Boolean);
+
+    const mentionNames = new Map();
+    for (const mentionId of mentionIds) {
+      const info = await this.resolveUserInfo(mentionId);
+      let name = String(info?.name || mentionId).replace(/\s+/g, " ").trim();
+      if (normalizeId(name) === normalizeId(mentionId)) {
+        const orchestorAIAgentName = await this.resolveOrchestorAIAgentNameForSlackUserId(mentionId);
+        if (orchestorAIAgentName) {
+          name = orchestorAIAgentName;
+        }
+      }
+      mentionNames.set(mentionId, name || mentionId);
+    }
+
+    return source
+      .replace(/<@([A-Z0-9]+)>/gi, (_match, mentionId) => `@${mentionNames.get(String(mentionId).trim()) || mentionId}`)
+      .replace(/<!channel>/gi, "@channel")
+      .replace(/<!here>/gi, "@here")
+      .replace(/<!everyone>/gi, "@everyone")
+      .trim();
+  }
+
+  buildOrchestorAICodexContext({ mappedThread }) {
+    if (!this.isOrchestorAIEnabled()) {
+      return [];
+    }
+
+    const lines = [
+      `enabled=${this.config.orchestorai.enabled ? "true" : "false"}`,
+      `company_id=${this.config.orchestorai.companyId || "unknown"}`,
+    ];
+
+    if (!mappedThread) {
+      lines.push("current_thread_issue=none");
+      return lines;
+    }
+
+    lines.push(`current_thread_issue_id=${mappedThread.issueId || "unknown"}`);
+    lines.push(`current_thread_issue_identifier=${mappedThread.issueIdentifier || "unknown"}`);
+    lines.push(`current_thread_issue_title=${mappedThread.issueTitle || "unknown"}`);
+    if (mappedThread.projectId) {
+      lines.push(`current_thread_project_id=${mappedThread.projectId}`);
+    }
+    if (mappedThread.projectName) {
+      lines.push(`current_thread_project_name=${mappedThread.projectName}`);
+    }
+    if (mappedThread.assigneeAgentId) {
+      lines.push(`current_thread_assignee_agent_id=${mappedThread.assigneeAgentId}`);
+    }
+    if (mappedThread.assigneeName) {
+      lines.push(`current_thread_assignee_name=${mappedThread.assigneeName}`);
+    }
+    return lines;
+  }
+
+  async executeOrchestorAIAction(params) {
+    const { action, event, mappedThread, senderId, senderName, channelInfo, renderedText } = params;
+    if (!this.orchestoraiClient || !this.orchestoraiThreadStore) {
+      throw new Error("OrchestorAI bridge is not configured in this runtime");
+    }
+    if (!action || typeof action !== "object" || Array.isArray(action)) {
+      throw new Error("Invalid OrchestorAI action payload");
+    }
+
+    if (action.type === "create_issue") {
+      const title = String(action.title || "").trim();
+      if (!title) {
+        throw new Error("create_issue action requires a title");
+      }
+
+      const [agents, projects] = await Promise.all([
+        this.orchestoraiClient.listAgents({ includeSlack: true }),
+        this.orchestoraiClient.listProjects(),
+      ]);
+
+      let assigneeAgentId = null;
+      let assigneeName = "";
+      const assigneeReference = String(action.assignee || "").trim();
+      if (assigneeReference) {
+        const assignee = resolveAssigneeReference({
+          reference: assigneeReference,
+          agentMappings: this.config.orchestorai.agentMappings,
+          agents,
+        });
+        if (assignee.kind !== "match") {
+          if (assignee.kind === "ambiguous" && Array.isArray(assignee.candidates) && assignee.candidates.length > 0) {
+            throw new Error(
+              `Ambiguous assignee reference: ${assignee.candidates.map((candidate) => candidate.name).join(", ")}`,
+            );
+          }
+          throw new Error(`Could not resolve assignee: ${assigneeReference}`);
+        }
+        assigneeAgentId = assignee.agent.id;
+        assigneeName = assignee.agent.name || "";
+      }
+
+      let resolvedProject = null;
+      const projectSelection = selectCreateIssueProjectReference({
+        channelType: channelInfo?.type,
+        channelName: channelInfo?.name,
+        actionProject: action.project,
+      });
+      if (projectSelection.reference) {
+        const project = resolveProjectReference({
+          reference: projectSelection.reference,
+          projectMappings: this.config.orchestorai.projectMappings,
+          projects,
+        });
+        if (project.kind === "match") {
+          resolvedProject = project.project;
+        } else if (projectSelection.source === "channel") {
+          if (project.kind === "ambiguous" && Array.isArray(project.candidates) && project.candidates.length > 0) {
+            throw new Error(
+              `Ambiguous channel project mapping: ${project.candidates.map((candidate) => candidate.name).join(", ")}`,
+            );
+          }
+          throw new Error(`Could not resolve project for Slack channel: ${projectSelection.reference}`);
+        } else if (projectSelection.source === "action") {
+          if (project.kind === "ambiguous" && Array.isArray(project.candidates) && project.candidates.length > 0) {
+            throw new Error(
+              `Ambiguous project reference: ${project.candidates.map((candidate) => candidate.name).join(", ")}`,
+            );
+          }
+          throw new Error(`Could not resolve project: ${projectSelection.reference}`);
+        }
+      }
+
+      const descriptionPrefix = String(action.description || "").trim();
+      const description = descriptionPrefix
+        ? `${descriptionPrefix}\n\n---\n\n${buildIssueDescription({
+            text: renderedText,
+            senderName,
+            senderId,
+            channelId: event.channel,
+            channelName: channelInfo?.name,
+            threadTs: event.thread_ts || event.ts,
+            messageTs: event.ts,
+          })}`
+        : buildIssueDescription({
+            text: renderedText,
+            senderName,
+            senderId,
+            channelId: event.channel,
+            channelName: channelInfo?.name,
+            threadTs: event.thread_ts || event.ts,
+            messageTs: event.ts,
+          });
+
+      const issue = await this.orchestoraiClient.createIssue({
+        title,
+        description,
+        status: "todo",
+        priority: String(action.priority || "medium").trim() || "medium",
+        ...(assigneeAgentId ? { assigneeAgentId } : {}),
+        ...(resolvedProject?.id ? { projectId: resolvedProject.id } : {}),
+      });
+
+      const mappingThreadTs = event.thread_ts || event.ts;
+      if (mappingThreadTs && !mappedThread) {
+        this.orchestoraiThreadStore.putMapping({
+          channelId: event.channel,
+          threadTs: mappingThreadTs,
+          companyId: this.config.orchestorai.companyId,
+          issueId: issue.id,
+          issueIdentifier: issue.identifier,
+          issueTitle: issue.title,
+          assigneeAgentId: issue.assigneeAgentId || assigneeAgentId,
+          assigneeName,
+          projectId: issue.projectId || resolvedProject?.id || null,
+          projectName: resolvedProject?.name || "",
+          sourceMessageTs: event.ts,
+        });
+      }
+
+      const parts = [`Created OrchestorAI issue ${issue.identifier || issue.id}.`];
+      if (assigneeName) {
+        parts.push(`Assigned it to ${assigneeName}.`);
+      }
+      if (resolvedProject?.name) {
+        parts.push(`Project: ${resolvedProject.name}.`);
+      }
+      return parts.join(" ");
+    }
+
+    if (action.type === "add_comment") {
+      const body = String(action.body || "").trim();
+      if (!body) {
+        throw new Error("add_comment action requires a body");
+      }
+
+      const issueRef = String(action.issueRef || "").trim();
+      const issue = issueRef
+        ? await this.orchestoraiClient.getIssue(issueRef)
+        : mappedThread?.issueId
+          ? await this.orchestoraiClient.getIssue(mappedThread.issueId)
+          : null;
+
+      if (!issue?.id) {
+        throw new Error("Could not resolve the target issue for this comment");
+      }
+
+      await this.orchestoraiClient.addIssueComment(issue.id, body);
+      return `Added a comment to ${issue.identifier || issue.id}.`;
+    }
+
+    throw new Error(`Unsupported OrchestorAI action type: ${String(action.type || "unknown")}`);
+  }
+
   async addAckReaction(event) {
     const reaction = String(this.config.slack.ackReaction || "").trim().replace(/^:+|:+$/g, "");
     if (!reaction || !event?.ts) {
@@ -1868,6 +2177,21 @@ export class SlackRuntime {
       return reaction;
     } catch {
       return null;
+    }
+  }
+
+  async resolveOrchestorAIAgentNameForSlackUserId(userId) {
+    if (!this.orchestoraiClient || !userId) {
+      return "";
+    }
+    try {
+      const agents = await this.orchestoraiClient.listAgents({ includeSlack: true });
+      const matched = agents.find(
+        (agent) => normalizeId(agent?.slackBotUserId || agent?.botUserId || "") === normalizeId(userId),
+      );
+      return String(matched?.name || "").trim();
+    } catch {
+      return "";
     }
   }
 
@@ -2486,23 +2810,20 @@ export class SlackRuntime {
     }
 
     if (channelType === "channel" || channelType === "group" || channelType === "im") {
+      const handledApprovalThread = await this.maybeHandleOrchestorAIApprovalThreadReply({
+        event,
+        channelType,
+      });
+      if (handledApprovalThread) {
+        return;
+      }
+
       this.rememberOrchestorAIPreferredChannel({
         channelId: event.channel,
         channelType,
         event,
         options,
       });
-      const handledByOrchestorAI = await this.maybeHandleOrchestorAIMessage({
-        event,
-        options,
-        channelType,
-        senderId,
-        senderName,
-        channelInfo,
-      });
-      if (handledByOrchestorAI) {
-        return;
-      }
     }
 
     if (channelType === "channel" || channelType === "group") {
@@ -2513,7 +2834,9 @@ export class SlackRuntime {
       }
     }
 
-    const cleanedText = cleanSlackText(event.text || "");
+    const mappedThread = this.getMappedOrchestorAIThread(event);
+    const renderedText = await this.renderSlackTextForCodex(event.text || "");
+    const cleanedText = renderedText.trim();
     const hasFiles = Array.isArray(event.files) && event.files.length > 0;
     if (!cleanedText && !hasFiles) {
       this.log("debug", "drop: empty message body and no files");
@@ -2545,22 +2868,52 @@ export class SlackRuntime {
         channelName: channelInfo.name,
         channelTopic: channelInfo.topic,
         channelPurpose: channelInfo.purpose,
+        orchestoraiContextLines: this.buildOrchestorAICodexContext({ mappedThread }),
         historyLines,
         attachments,
       });
 
       const queueKey = this.resolveSessionQueueKey(event, channelType);
       this.log("debug", `processing: queueKey=${queueKey} sender=${senderId} chatType=${chatType}`);
-      const codexReply = await this.codex.request(
+      const codexReply = await this.resolveCodexAdapter(channelType).request(
         {
           userText: cleanedText || "[Message contains attachments only]",
           context: promptContext,
+          instructions: this.isOrchestorAIEnabled() ? buildOrchestorAIActionInstructions() : "",
         },
         queueKey,
       );
 
-      const tags = parseReplyTag(codexReply);
-      const replyText = tags.cleaned || codexReply;
+      const actionEnvelope = extractOrchestorAIAction(codexReply);
+      if (actionEnvelope.actionError) {
+        this.log("warn", `orchestorai action block parse failed: ${actionEnvelope.actionError}`);
+      }
+
+      let actionSummary = "";
+      if (actionEnvelope.action) {
+        try {
+          actionSummary = await this.executeOrchestorAIAction({
+            action: actionEnvelope.action,
+            event,
+            mappedThread,
+            senderId,
+            senderName,
+            channelInfo,
+            renderedText,
+          });
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          actionSummary = `OrchestorAI action failed: ${reason}`;
+          this.log("warn", `orchestorai action execution failed: ${reason}`);
+        }
+      }
+
+      const tags = parseReplyTag(actionEnvelope.replyText || codexReply);
+      const replyText = composeSlackReplyText({
+        replyText: tags.cleaned || actionEnvelope.replyText || codexReply,
+        actionSummary,
+        hasOrchestorAIAction: Boolean(actionEnvelope.action),
+      });
       const replyThreadTs = this.resolveReplyThreadTs(event, chatType, tags);
 
       await this.sendWithStreaming({
@@ -2894,7 +3247,8 @@ export class SlackRuntime {
 
         const sender = await this.resolveUserInfo(command.user_id);
         const channelInfo = await this.resolveChannelInfo(command.channel_id);
-        const chatType = normalizeChannelType(channelInfo.type, command.channel_id) === "im" ? "direct" : "channel";
+        const channelType = normalizeChannelType(channelInfo.type, command.channel_id);
+        const chatType = channelType === "im" ? "direct" : "channel";
 
         const context = [
           `slash_command=${slashCommand}`,
@@ -2906,7 +3260,7 @@ export class SlackRuntime {
         ].join("\n");
 
         const queueKey = `slash:${command.user_id}:${command.channel_id}`;
-        const reply = await this.codex.request(
+        const reply = await this.resolveCodexAdapter(channelType).request(
           {
             userText: rawText,
             context,
@@ -2952,7 +3306,7 @@ export class SlackRuntime {
   }
 
   async start() {
-    await this.codex.ensureReady();
+    await this.ensureCodexReady();
 
     let auth;
     try {

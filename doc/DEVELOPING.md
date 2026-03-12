@@ -10,6 +10,27 @@ Current implementation status:
 
 - canonical model: `local_trusted` and `authenticated` (with `private/public` exposure)
 
+## Production Service Wrapper
+
+Use the production wrapper script when you want one command for a specific long-running service:
+
+```sh
+bash scripts/start-production-service.sh backend
+bash scripts/start-production-service.sh frontend
+bash scripts/start-production-service.sh slack-bot
+bash scripts/start-production-service.sh slack-dm
+bash scripts/start-production-service.sh stack
+```
+
+Use the multi-terminal launcher when you want backend, frontend, and the combined OrchestorAI Slack bot started together in separate macOS Terminal sessions:
+
+```sh
+bash scripts/start-production-terminals.sh
+pnpm run start:prod:terminals
+```
+
+This launcher builds once up front, then starts each service with `ORCHESTORAI_SKIP_BUILD=true`. Terminal may open new windows or new tabs depending on your local Terminal preferences.
+
 ## Prerequisites
 
 - Node.js 20+
@@ -129,6 +150,20 @@ Expected:
 
 - `/api/health` returns `{"status":"ok"}`
 - `/api/companies` returns a JSON array
+
+## Slack Env Separation
+
+For the integrated Slack runtime, keep Slack-specific env in:
+
+- `packages/slack-channel-bot/.env`
+
+Keep OrchestorAI instance env in the home instance path:
+
+- `~/.orchestorai/instances/default/.env`
+
+The Slack runtime reads Slack auth/settings from its package env and reads OrchestorAI bridge values from the OrchestorAI home env by default.
+
+For Codex reasoning effort in Slack, set `CODEX_THINKING` in `packages/slack-channel-bot/.env` with one of `minimal`, `low`, `medium`, or `high`.
 
 ## Reset Local Dev Database
 

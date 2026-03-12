@@ -1,65 +1,29 @@
-# OrchestorAI Slack Bot
+# @orchestorai/slack-bot
 
-This workspace package contains the Slack + Codex runtime that is currently bridged to OrchestorAI.
+Compatibility wrapper around [`@orchestorai/slack-channel-bot`](/Users/naveenkumar/Workspace/AI/AGI/OrchestorAI/packages/slack-channel-bot) for the current OrchestorAI deployment and scripts.
 
-It preserves the current behavior:
+This package preserves legacy behavior while the Slack runtime is split into:
 
-- Slack assistant replies through the local Codex CLI
-- explicit `@orchestorai task:` issue creation
-- OrchestorAI project and agent alias mapping
-- Slack thread <-> OrchestorAI issue linking
-- high-signal OrchestorAI updates mirrored back into Slack
-- child OrchestorAI issues creating their own Slack threads
+- [`slack-agent-core`](/Users/naveenkumar/Workspace/AI/AGI/OrchestorAI/packages/slack-agent-core)
+- [`slack-agent-dm`](/Users/naveenkumar/Workspace/AI/AGI/OrchestorAI/packages/slack-agent-dm)
+- [`@orchestorai/slack-channel-bot`](/Users/naveenkumar/Workspace/AI/AGI/OrchestorAI/packages/slack-channel-bot)
 
-## Local development
+Compatibility guarantees:
 
-From the repo root:
+- `pnpm --filter @orchestorai/slack-bot start` still starts the OrchestorAI Slack runtime
+- legacy `SLACK_CODEX_CONFIG` and `CODEX_*` settings still work
+- DMs remain enabled when this wrapper is used
+- DMs use a separate Codex adapter with `danger-full-access` plus the explicit bypass flag
+- channels keep using the configured `CODEX_SANDBOX` value from the shared Slack env
+- `CODEX_THINKING` and `CODEX_REASONING_EFFORT` map to Codex CLI `model_reasoning_effort` with `minimal|low|medium|high`
 
-```bash
-pnpm dev:server
-pnpm dev:slack-bot
-```
+Environment layout:
 
-Or run both together:
+- Slack runtime env is now owned by [packages/slack-channel-bot/.env.example](/Users/naveenkumar/Workspace/AI/AGI/OrchestorAI/packages/slack-channel-bot/.env.example#L1) and can be overridden with `SLACK_CHANNEL_BOT_ENV_FILE`
+- OrchestorAI bridge env defaults to `~/.orchestorai/instances/default/.env`
+- Slack tokens stay in the channel-bot env file; OrchestorAI bridge values come from the OrchestorAI home env unless you override them in the Slack env
 
-```bash
-ORCHESTORAI_SLACK_ENABLED=true pnpm dev:stack
-```
+For new work, prefer:
 
-The Slack bot reads configuration from environment variables or `slack-codex.config.json` in this package directory.
-
-Important defaults for this monorepo:
-
-- `CODEX_WORKDIR=../..` in `.env.example`
-- `ORCHESTORAI_API_URL=http://127.0.0.1:3100`
-- `SLACK_PORT=3000`
-
-## Docker
-
-The root `Dockerfile` now supports running OrchestorAI and this Slack bot in one image.
-
-Build and run the combined stack with:
-
-```bash
-ORCHESTORAI_SLACK_ENABLED=true docker compose -f docker-compose.slack.yml up --build
-```
-
-Required environment variables for the Slack side:
-
-- `SLACK_BOT_TOKEN`
-- `SLACK_APP_TOKEN` for socket mode
-- `SLACK_SIGNING_SECRET` for HTTP mode
-- `ORCHESTORAI_COMPANY_ID` if you want the OrchestorAI bridge enabled immediately
-
-The image already includes the Codex CLI, but the Slack runtime still requires a valid Codex login. Because the container uses `HOME=/orchestorai`, you can either:
-
-- persist `/orchestorai/.codex` in the mounted volume, or
-- run `docker exec -it <container> codex login` once after startup
-
-## Package commands
-
-```bash
-pnpm --filter @orchestorai/slack-bot start
-pnpm --filter @orchestorai/slack-bot check
-pnpm --filter @orchestorai/slack-bot test
-```
+- `pnpm --filter slack-agent-dm start` for reusable DM-only usage
+- `pnpm --filter @orchestorai/slack-channel-bot start` for OrchestorAI channel usage

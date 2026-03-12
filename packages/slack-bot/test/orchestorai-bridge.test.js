@@ -15,7 +15,9 @@ import {
   formatChildIssueThreadRootMessage,
   hasOrchestorAITrigger,
   resolveAssignee,
+  resolveAssigneeReference,
   resolveProject,
+  resolveProjectReference,
   stripBotMention,
 } from "../src/orchestorai-bridge.js";
 import { OrchestorAIThreadStore } from "../src/orchestorai-thread-store.js";
@@ -224,6 +226,54 @@ test("resolveAssignee falls back to agent urlKey when alias metadata is unavaila
   assert.equal(result.source, "agent_url_key");
 });
 
+test("resolveAssigneeReference matches exact OrchestorAI agent names without Slack mention syntax", () => {
+  const result = resolveAssigneeReference({
+    reference: "Nick (SDE-3)",
+    agentMappings: {},
+    agents: [
+      { id: "agent-1", name: "Nick (SDE-3)", urlKey: "nick-sde-3", metadata: null },
+    ],
+  });
+
+  assert.equal(result.kind, "match");
+  assert.equal(result.agent.id, "agent-1");
+  assert.equal(result.source, "agent_name");
+});
+
+test("resolveAssigneeReference matches configured aliases even after Slack mention normalization", () => {
+  const result = resolveAssigneeReference({
+    reference: "@nick",
+    agentMappings: {
+      "@nick": "agent-1",
+    },
+    agents: [
+      { id: "agent-1", name: "Nick (SDE-3)" },
+    ],
+  });
+
+  assert.equal(result.kind, "match");
+  assert.equal(result.agent.id, "agent-1");
+  assert.equal(result.source, "mapping");
+});
+
+test("resolveAssigneeReference matches Slack bot user ids from enriched agent metadata", () => {
+  const result = resolveAssigneeReference({
+    reference: "<@U0AKA233HGA>",
+    agentMappings: {},
+    agents: [
+      {
+        id: "agent-1",
+        name: "Nick (SDE-3)",
+        slackBotUserId: "U0AKA233HGA",
+      },
+    ],
+  });
+
+  assert.equal(result.kind, "match");
+  assert.equal(result.agent.id, "agent-1");
+  assert.equal(result.source, "slack_bot_user_id");
+});
+
 test("extractProjectSelectors reads project metadata lines", () => {
   const selectors = extractProjectSelectors(
     "task: Fix onboarding\nproject: Eyalty App\n#project expense-tracker",
@@ -315,6 +365,20 @@ test("resolveProject falls back to project urlKey when alias metadata is unavail
   assert.equal(result.kind, "match");
   assert.equal(result.project.id, "project-1");
   assert.equal(result.source, "project_url_key");
+});
+
+test("resolveProjectReference matches exact project names without requiring project: syntax", () => {
+  const result = resolveProjectReference({
+    reference: "AI Auto Expense Tracker",
+    projectMappings: {},
+    projects: [
+      { id: "project-1", name: "AI-Auto-Expense-Tracker", urlKey: "expense-tracker", metadata: null },
+    ],
+  });
+
+  assert.equal(result.kind, "match");
+  assert.equal(result.project.id, "project-1");
+  assert.equal(result.source, "project_name");
 });
 
 test("stripBotMention only removes the bot mention", () => {

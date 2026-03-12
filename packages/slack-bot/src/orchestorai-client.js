@@ -1,3 +1,5 @@
+import { createHmac } from "node:crypto";
+
 function trimTrailingSlash(value) {
   return String(value || "").replace(/\/+$/, "");
 }
@@ -28,6 +30,7 @@ export class OrchestorAIClient {
   constructor(params) {
     this.apiUrl = trimTrailingSlash(params.apiUrl);
     this.companyId = String(params.companyId || "").trim();
+    this.controlSigningSecret = String(params.controlSigningSecret || "").trim();
     this.fetchImpl = params.fetchImpl || globalThis.fetch;
     this.WebSocketImpl = params.WebSocketImpl || globalThis.WebSocket;
     this.log = typeof params.log === "function" ? params.log : () => {};
@@ -35,6 +38,11 @@ export class OrchestorAIClient {
       expiresAt: 0,
       value: [],
     };
+    this.agentWithSlackCache = {
+      expiresAt: 0,
+      value: [],
+    };
+    this.agentSlackAppCache = new Map();
     this.projectCache = {
       expiresAt: 0,
       value: [],
@@ -49,20 +57,35 @@ export class OrchestorAIClient {
   buildUrl(pathname) {
     return `${this.apiUrl}${pathname}`;
   }
-
+  buildSignedSlackHeaders(rawBody) {
+    if (!this.controlSigningSecret) {
+      throw new Error("control signing secret is not configured");
+    }
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const base = `v0:${timestamp}:${rawBody}`;
+    const signature = `v0=${createHmac("sha256", this.controlSigningSecret).update(base).digest("hex")}`;
+    return {
+      "x-slack-request-timestamp": timestamp,
+      "x-slack-signature": signature,
+    };
+  }
   async requestJson(method, pathname, body, options = {}) {
     if (typeof this.fetchImpl !== "function") {
       throw new Error("fetch is not available in this runtime");
     }
 
+    const rawBody = body ? JSON.stringify(body) : undefined;
+    const headers = {
+      Accept: "application/json",
+      ...(options.headers || {}),
+      ...(rawBody ? { "Content-Type": "application/json" } : {}),
+      ...(options.signed && rawBody ? this.buildSignedSlackHeaders(rawBody) : {}),
+    };
+
     const response = await this.fetchImpl(this.buildUrl(pathname), {
       method,
-      headers: {
-        Accept: "application/json",
-        ...(options.headers || {}),
-        ...(body ? { "Content-Type": "application/json" } : {}),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
+      headers,
+      ...(rawBody ? { body: rawBody } : {}),
     });
 
     if (!response.ok) {
@@ -79,17 +102,88 @@ export class OrchestorAIClient {
     return await readResponseBody(response);
   }
 
+  async handleSlackApprovalThreadReply(body) {
+    return await this.requestJson(
+      "POST",
+      "/api/slack/control/approval-thread-replies",
+      body,
+      { signed: true },
+    );
+  }
+
   async listAgents(options = {}) {
     const force = Boolean(options.force);
-    if (!force && this.agentCache.expiresAt > Date.now()) {
-      return this.agentCache.value;
+    const includeSlack = Boolean(options.includeSlack);
+    const now = Date.now();
+    if (includeSlack && !force && this.agentWithSlackCache.expiresAt > now) {
+      return this.agentWithSlackCache.value;
+    }
+    if (!force && this.agentCache.expiresAt > now) {
+      return includeSlack ? await this.attachSlackAgentData(this.agentCache.value, { force }) : this.agentCache.value;
     }
     const agents = await this.requestJson("GET", `/api/companies/${this.companyId}/agents`);
     this.agentCache = {
-      expiresAt: Date.now() + 60 * 1000,
+      expiresAt: now + 60 * 1000,
       value: Array.isArray(agents) ? agents : [],
     };
-    return this.agentCache.value;
+    if (!includeSlack) {
+      return this.agentCache.value;
+    }
+    return await this.attachSlackAgentData(this.agentCache.value, { force });
+  }
+
+  async getAgentSlackApp(agentId, options = {}) {
+    const id = String(agentId || "").trim();
+    if (!id) {
+      return null;
+    }
+    const force = Boolean(options.force);
+    const cached = this.agentSlackAppCache.get(id);
+    if (!force && cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+    const slackApp = await this.requestJson("GET", `/api/agents/${id}/slack`);
+    const value = slackApp && typeof slackApp === "object" ? slackApp : null;
+    this.agentSlackAppCache.set(id, {
+      expiresAt: Date.now() + 60 * 1000,
+      value,
+    });
+    return value;
+  }
+
+  async attachSlackAgentData(agents, options = {}) {
+    const force = Boolean(options.force);
+    const source = Array.isArray(agents) ? agents : [];
+    const enriched = await Promise.all(
+      source.map(async (agent) => {
+        const agentId = String(agent?.id || "").trim();
+        if (!agentId) {
+          return agent;
+        }
+        try {
+          const slackApp = await this.getAgentSlackApp(agentId, { force });
+          const botUserId = String(slackApp?.botUserId || "").trim();
+          if (!botUserId) {
+            return agent;
+          }
+          return {
+            ...agent,
+            slackBotUserId: botUserId,
+          };
+        } catch (error) {
+          this.log(
+            "warn",
+            `Failed to load Slack app metadata for agent ${agentId}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return agent;
+        }
+      }),
+    );
+    this.agentWithSlackCache = {
+      expiresAt: Date.now() + 60 * 1000,
+      value: enriched,
+    };
+    return enriched;
   }
 
   async getAgentName(agentId) {

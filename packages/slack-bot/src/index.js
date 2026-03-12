@@ -1,22 +1,37 @@
-import { loadConfig } from "./config.js";
-import { CodexClient } from "./codex.js";
+import { pathToFileURL } from "node:url";
+import { loadConfig } from "@orchestorai/slack-channel-bot";
+import { buildSlackBotCodexAdapters, buildSlackBotDirectMessageModel } from "./codex-routing.js";
 import { SlackRuntime } from "./slack-runtime.js";
 
-async function main() {
-  const { config, configPath } = loadConfig(process.cwd());
+export { buildSlackBotCodexAdapters, buildSlackBotDirectMessageModel } from "./codex-routing.js";
 
-  const codex = new CodexClient(config.codex);
+export async function startSlackBot(options = {}) {
+  const cwd = options.cwd || process.cwd();
+  const { config, configPath } = loadConfig(cwd, {
+    ...options,
+    allowDirectMessages: true,
+  });
+  const { defaultAdapter, directMessageAdapter } = buildSlackBotCodexAdapters(config, options);
   const runtime = new SlackRuntime({
     config,
     configPath,
-    codex,
+    codex: defaultAdapter,
+    directMessageCodex: directMessageAdapter,
   });
-
   await runtime.start();
+  return runtime;
 }
 
-main().catch((err) => {
-  const reason = err instanceof Error ? err.message : String(err);
-  console.error(`startup failed: ${reason}`);
-  process.exit(1);
-});
+async function main() {
+  await startSlackBot({
+    cwd: process.cwd(),
+  });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    const reason = err instanceof Error ? err.message : String(err);
+    console.error(`startup failed: ${reason}`);
+    process.exit(1);
+  });
+}
