@@ -4,6 +4,8 @@ OrchestorAI-specific Slack runtime for channels and group conversations.
 
 This package keeps the existing OrchestorAI bridge behavior and channel ownership while using the shared `slack-agent-core` model adapter and utilities.
 
+Supported local artifacts produced by Codex replies, such as screenshots and reports, are uploaded back into the same Slack thread automatically.
+
 Start it with:
 
 - `pnpm --filter @orchestorai/slack-channel-bot start`

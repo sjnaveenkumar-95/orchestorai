@@ -8,6 +8,13 @@ import {
   buildOrchestorAIActionInstructions,
   extractOrchestorAIAction,
 } from "./orchestorai-action-protocol.js";
+import {
+  buildSlackArtifactInstructions,
+  collectSlackReplyArtifacts,
+  extractSlackArtifacts,
+  finalizeSlackReplyText,
+  uploadSlackReplyArtifacts,
+} from "./slack-reply-artifacts.js";
 import { resolveSlackBotCodexAdapter } from "./runtime-codex.js";
 import {
   detectOrchestorAICommentRequest,
@@ -2879,7 +2886,12 @@ export class SlackRuntime {
         {
           userText: cleanedText || "[Message contains attachments only]",
           context: promptContext,
-          instructions: this.isOrchestorAIEnabled() ? buildOrchestorAIActionInstructions() : "",
+          instructions: [
+            buildSlackArtifactInstructions(),
+            this.isOrchestorAIEnabled() ? buildOrchestorAIActionInstructions() : "",
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
         },
         queueKey,
       );
@@ -2887,6 +2899,10 @@ export class SlackRuntime {
       const actionEnvelope = extractOrchestorAIAction(codexReply);
       if (actionEnvelope.actionError) {
         this.log("warn", `orchestorai action block parse failed: ${actionEnvelope.actionError}`);
+      }
+      const artifactEnvelope = extractSlackArtifacts(actionEnvelope.replyText || codexReply);
+      if (artifactEnvelope.artifactError) {
+        this.log("warn", `slack artifact block parse failed: ${artifactEnvelope.artifactError}`);
       }
 
       let actionSummary = "";
@@ -2908,25 +2924,43 @@ export class SlackRuntime {
         }
       }
 
-      const tags = parseReplyTag(actionEnvelope.replyText || codexReply);
+      const tags = parseReplyTag(artifactEnvelope.replyText || actionEnvelope.replyText || codexReply);
+      const visibleReplyText = tags.cleaned || artifactEnvelope.replyText || actionEnvelope.replyText || codexReply;
+      const candidateArtifacts = collectSlackReplyArtifacts({
+        replyText: visibleReplyText,
+        structuredArtifacts: artifactEnvelope.artifacts,
+      });
       const replyText = composeSlackReplyText({
-        replyText: tags.cleaned || actionEnvelope.replyText || codexReply,
+        replyText: visibleReplyText,
         actionSummary,
         hasOrchestorAIAction: Boolean(actionEnvelope.action),
       });
       const replyThreadTs = this.resolveReplyThreadTs(event, chatType, tags);
-
-      await this.sendWithStreaming({
+      const uploadResults = await uploadSlackReplyArtifacts({
+        client: this.app.client,
         channel: event.channel,
         threadTs: replyThreadTs,
-        text: replyText,
+        artifacts: candidateArtifacts,
       });
+      const finalReplyText = finalizeSlackReplyText({
+        replyText,
+        uploadedArtifacts: uploadResults.uploadedArtifacts,
+        failedArtifacts: uploadResults.failedArtifacts,
+      });
+
+      if (finalReplyText) {
+        await this.sendWithStreaming({
+          channel: event.channel,
+          threadTs: replyThreadTs,
+          text: finalReplyText,
+        });
+      }
       this.log(
         "debug",
-        `reply sent: channel=${event.channel} thread=${replyThreadTs || "none"} mode=${this.config.slack.streaming}`,
+        `reply sent: channel=${event.channel} thread=${replyThreadTs || "none"} mode=${this.config.slack.streaming} uploads=${uploadResults.uploadedArtifacts.length}`,
       );
 
-      if (replyThreadTs) {
+      if (replyThreadTs && (finalReplyText || uploadResults.uploadedArtifacts.length > 0)) {
         this.threadParticipation.set(`${event.channel}:${replyThreadTs}`, Date.now());
       }
     } catch (err) {

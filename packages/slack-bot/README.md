@@ -16,6 +16,7 @@ Compatibility guarantees:
 - DMs use a separate Codex adapter with `danger-full-access` plus the explicit bypass flag
 - channels keep using the configured `CODEX_SANDBOX` value from the shared Slack env
 - `CODEX_THINKING` and `CODEX_REASONING_EFFORT` map to Codex CLI `model_reasoning_effort` with `minimal|low|medium|high`
+- supported local artifacts produced by Codex replies, such as screenshots and reports, are uploaded back into the same Slack thread automatically
 
 Environment layout:
 
