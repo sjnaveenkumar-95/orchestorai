@@ -65,6 +65,17 @@ type ActorRef = {
   agentId?: string | null;
 };
 
+type SlackControlMessageFile = {
+  id?: string;
+  name?: string;
+  title?: string;
+  mimetype?: string;
+  filetype?: string;
+  pretty_type?: string;
+  size?: number;
+  permalink?: string;
+};
+
 type SlackControlMessageEvent = {
   type: string;
   channel?: string;
@@ -74,6 +85,7 @@ type SlackControlMessageEvent = {
   user?: string;
   bot_id?: string;
   subtype?: string;
+  files?: SlackControlMessageFile[];
 };
 
 type SlackControlEventEnvelope = {
@@ -120,6 +132,8 @@ const SLACK_SYSTEM_ACTOR_ID = "slack_control";
 const SLACK_AUTO_APPLY_CONFIDENCE = 0.7;
 const SLACK_API_TIMEOUT_MS = 15000;
 const SLACK_THREAD_STATUS_REFRESH_MS = 4000;
+const MAX_SLACK_CONTROL_FILES = 5;
+const SUPPORTED_SLACK_CONTROL_SUBTYPES = new Set(["file_share", "thread_broadcast", "message_replied"]);
 const ACTIONABLE_APPROVAL_STATUSES = new Set(["pending", "revision_requested"]);
 
 export function deriveSocialRoomThreadStatusFromHeartbeatEvent(input: {
@@ -474,6 +488,53 @@ function collapseWhitespace(value: string) {
     .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function formatSlackControlFileLabel(file: SlackControlMessageFile) {
+  const name = readNonEmptyString(file.name) ?? readNonEmptyString(file.title) ?? readNonEmptyString(file.id) ?? "unnamed file";
+  const parts = uniqueStrings([readNonEmptyString(file.pretty_type), readNonEmptyString(file.mimetype)]);
+  if (parts.length === 0) {
+    return name;
+  }
+  return `${name} (${parts.join(", ")})`;
+}
+
+function buildSlackControlFileSummary(files: SlackControlMessageFile[] | null | undefined) {
+  if (!Array.isArray(files) || files.length === 0) {
+    return "";
+  }
+
+  const labels = files
+    .slice(0, MAX_SLACK_CONTROL_FILES)
+    .map((file) => formatSlackControlFileLabel(file))
+    .filter(Boolean);
+
+  if (labels.length === 0) {
+    return "";
+  }
+
+  return ["Attached files:", ...labels.map((label) => `- ${label}`)].join("\n");
+}
+
+export function buildSlackControlMessageText(input: {
+  text?: string | null;
+  files?: SlackControlMessageFile[] | null;
+}) {
+  const text = String(input.text ?? "").trim();
+  const fileSummary = buildSlackControlFileSummary(input.files);
+
+  if (text && fileSummary) {
+    return `${text}\n\n${fileSummary}`;
+  }
+  return text || fileSummary;
+}
+
+export function isSupportedSlackControlSubtype(subtype: string | null | undefined) {
+  const normalized = readNonEmptyString(subtype);
+  if (!normalized) {
+    return true;
+  }
+  return SUPPORTED_SLACK_CONTROL_SUBTYPES.has(normalized);
 }
 
 function extractSlackMentionIds(text: string) {
@@ -1772,6 +1833,7 @@ export function slackIntegrationService(db: Db) {
     projectChannel: typeof projectSlackChannels.$inferSelect;
     threadLink: SlackThreadLink | null;
     event: SlackControlMessageEvent;
+    originalText: string;
     normalizedText: string;
     threadTs: string;
     isThreadReply: boolean;
@@ -1827,7 +1889,7 @@ export function slackIntegrationService(db: Db) {
       messageTs: readNonEmptyString(input.event.ts) ?? input.threadTs,
       authorSlackUserId: readNonEmptyString(input.event.user),
       authorSlackUserName: null,
-      originalText: input.event.text ?? "",
+      originalText: input.originalText,
       normalizedText: input.normalizedText,
       isThreadReply: input.isThreadReply,
       isLinkedIssueThread: Boolean(input.threadLink),
@@ -3759,7 +3821,7 @@ function parseApprovalDecision(text: string): "once" | "always" | "reject" | nul
 
     if (
       envelope.event.type !== "message" ||
-      envelope.event.subtype ||
+      !isSupportedSlackControlSubtype(envelope.event.subtype) ||
       envelope.event.bot_id ||
       (companyChatRoom ? companyChatRoom.status !== "active" || !companyChatRoom.enabled : false) &&
       (!projectChannel || projectChannel.status !== "active")
@@ -3771,7 +3833,11 @@ function parseApprovalDecision(text: string): "once" | "always" | "reject" | nul
     if (!threadTs) return;
 
     const isThreadReply = Boolean(envelope.event.thread_ts && envelope.event.thread_ts !== envelope.event.ts);
-    const normalizedText = collapseWhitespace(stripLeadingSlackMentions(envelope.event.text ?? ""));
+    const originalText = buildSlackControlMessageText({
+      text: envelope.event.text ?? "",
+      files: envelope.event.files ?? [],
+    });
+    const normalizedText = collapseWhitespace(stripLeadingSlackMentions(originalText));
     if (!normalizedText) return;
 
     if (companyChatRoom && companyChatRoom.status === "active" && companyChatRoom.enabled) {
@@ -3829,7 +3895,7 @@ function parseApprovalDecision(text: string): "once" | "always" | "reject" | nul
       messageTs: readNonEmptyString(envelope.event.ts) ?? threadTs,
       slackUserId: readNonEmptyString(envelope.event.user),
       slackUserName: null,
-      requestText: envelope.event.text ?? "",
+      requestText: originalText,
       normalizedText,
     });
 
@@ -3844,6 +3910,7 @@ function parseApprovalDecision(text: string): "once" | "always" | "reject" | nul
         projectChannel,
         threadLink,
         event: envelope.event,
+        originalText,
         normalizedText,
         threadTs,
         isThreadReply,
