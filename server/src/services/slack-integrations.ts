@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "@orchestorai/db";
 import {
   agentSlackApps,
   agents,
   approvals,
   authUsers,
+  companyChatThreads,
   companies,
+  companyChatRooms,
   heartbeatRuns,
   projectMembers,
   projectSlackChannels,
@@ -19,6 +21,7 @@ import {
 } from "@orchestorai/db";
 import type {
   AgentSlackApp,
+  CompanyChatRoom,
   LiveEvent,
   ProjectSlackChannel,
   ProjectSlackMembership,
@@ -30,6 +33,7 @@ import type {
 } from "@orchestorai/shared";
 import {
   buildProjectSlackChannelName,
+  normalizeSlackChannelName,
   normalizeReferenceAlias,
   readReferenceAliases,
 } from "@orchestorai/shared";
@@ -47,6 +51,7 @@ import { issueService } from "./issues.js";
 import { logActivity } from "./activity-log.js";
 import { subscribeAllLiveEvents } from "./live-events.js";
 import { projectService } from "./projects.js";
+import { socialRoomService } from "./social-room.js";
 import {
   type SlackActionInterpreterInput,
   type SlackInterpreterCandidateAgent,
@@ -116,6 +121,69 @@ const SLACK_AUTO_APPLY_CONFIDENCE = 0.7;
 const SLACK_API_TIMEOUT_MS = 15000;
 const SLACK_THREAD_STATUS_REFRESH_MS = 4000;
 const ACTIONABLE_APPROVAL_STATUSES = new Set(["pending", "revision_requested"]);
+
+export function deriveSocialRoomThreadStatusFromHeartbeatEvent(input: {
+  eventType: LiveEvent["type"];
+  runStatus?: string | null;
+  hasActiveResponders: boolean;
+}) {
+  if (input.eventType === "heartbeat.run.queued") {
+    return "Selecting responders...";
+  }
+  if (input.eventType !== "heartbeat.run.status") {
+    return null;
+  }
+  const runStatus = readNonEmptyString(input.runStatus);
+  if (!runStatus) return null;
+  if (runStatus === "queued") return "Selecting responders...";
+  if (runStatus === "running") return "Waiting for replies...";
+  if (
+    runStatus === "succeeded" ||
+    runStatus === "failed" ||
+    runStatus === "cancelled" ||
+    runStatus === "timed_out"
+  ) {
+    return input.hasActiveResponders ? "Waiting for replies..." : "";
+  }
+  return null;
+}
+
+type SocialRoomProgressResponder = {
+  agentName: string;
+  runStatus: string;
+};
+
+function formatHumanNameList(names: string[]) {
+  if (names.length === 0) return "";
+  if (names.length === 1) return names[0] ?? "";
+  if (names.length === 2) return `${names[0] ?? ""} and ${names[1] ?? ""}`;
+  return `${names[0] ?? ""}, ${names[1] ?? ""} +${names.length - 2} more`;
+}
+
+export function formatSocialRoomThreadProgressStatus(input: {
+  activeResponders: SocialRoomProgressResponder[];
+  followOnPending: boolean;
+  fallbackStatus?: string | null;
+}) {
+  const runningResponder = input.activeResponders.find((responder) => responder.runStatus === "running");
+  if (runningResponder) {
+    const queuedCount = Math.max(input.activeResponders.length - 1, 0);
+    if (queuedCount <= 0) {
+      return `${runningResponder.agentName} is replying...`;
+    }
+    return `${runningResponder.agentName} is replying... ${queuedCount} more queued.`;
+  }
+
+  if (input.activeResponders.length > 0) {
+    return `Waiting on ${formatHumanNameList(input.activeResponders.map((responder) => responder.agentName))}...`;
+  }
+
+  if (input.followOnPending) {
+    return "Choosing the next speaker...";
+  }
+
+  return input.fallbackStatus ?? "";
+}
 
 type SlackForwarderState = {
   db: object | null;
@@ -289,6 +357,14 @@ class SlackWebClient {
       ts: json.ts,
       threadTs: json.message?.thread_ts ?? input.threadTs ?? json.ts,
     };
+  }
+
+  async addReaction(input: { channel: string; messageTs: string; emoji: string }) {
+    await this.callJson("reactions.add", {
+      channel: input.channel,
+      timestamp: input.messageTs,
+      name: input.emoji,
+    });
   }
 
   async listThreadReplies(input: { channel: string; threadTs: string; limit?: number }) {
@@ -680,6 +756,16 @@ function toProjectSlackMembership(row: typeof projectSlackMemberships.$inferSele
   };
 }
 
+function toCompanyChatRoom(row: typeof companyChatRooms.$inferSelect): CompanyChatRoom {
+  return {
+    ...row,
+    status: row.status as CompanyChatRoom["status"],
+    allowedTopics: Array.isArray(row.allowedTopics)
+      ? (row.allowedTopics as unknown as CompanyChatRoom["allowedTopics"])
+      : [],
+  };
+}
+
 function resolvePublicBaseUrl() {
   const config = loadConfig();
   if (config.authPublicBaseUrl) {
@@ -732,6 +818,65 @@ async function slackManifestCreate(input: {
   return json;
 }
 
+async function slackManifestExport(input: {
+  manifestToken: string;
+  appId: string;
+}) {
+  const params = new URLSearchParams();
+  params.set("app_id", input.appId);
+  const response = await fetch("https://slack.com/api/apps.manifest.export", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${input.manifestToken}`,
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body: params,
+  });
+  const json = (await response.json()) as {
+    ok: boolean;
+    error?: string;
+    manifest?: Record<string, unknown>;
+  };
+  if (!response.ok || !json.ok) {
+    throw new SlackApiError(
+      "Slack API call failed: apps.manifest.export",
+      json.error ?? `http_${response.status}`,
+      json,
+    );
+  }
+  return json;
+}
+
+async function slackManifestUpdate(input: {
+  manifestToken: string;
+  appId: string;
+  manifest: Record<string, unknown>;
+}) {
+  const params = new URLSearchParams();
+  params.set("app_id", input.appId);
+  params.set("manifest", JSON.stringify(input.manifest));
+  const response = await fetch("https://slack.com/api/apps.manifest.update", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${input.manifestToken}`,
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body: params,
+  });
+  const json = (await response.json()) as {
+    ok: boolean;
+    error?: string;
+  };
+  if (!response.ok || !json.ok) {
+    throw new SlackApiError(
+      "Slack API call failed: apps.manifest.update",
+      json.error ?? `http_${response.status}`,
+      json,
+    );
+  }
+  return json;
+}
+
 async function slackOAuthExchange(input: {
   clientId: string;
   clientSecret: string;
@@ -773,6 +918,7 @@ export function slackIntegrationService(db: Db) {
   const instanceSettings = createInstanceSettingsService();
   const agentsSvc = agentService(db);
   const heartbeat = heartbeatService(db);
+  const socialRooms = socialRoomService(db);
   const issueCommands = issueCommandService(db);
   const interpreter = slackActionInterpreterService({ instanceSettings });
   const approvalsSvc = approvalService(db);
@@ -978,6 +1124,36 @@ export function slackIntegrationService(db: Db) {
         await pushStatus("");
       },
     };
+  }
+
+  async function setSlackThreadStatusBestEffort(input: {
+    channelId: string;
+    threadTs: string;
+    status: string;
+    runId?: string;
+    chatThreadId?: string;
+  }) {
+    const client = await getControlClient();
+    if (!client) return;
+    try {
+      await client.setThreadStatus({
+        channelId: input.channelId,
+        threadTs: input.threadTs,
+        status: input.status,
+      });
+    } catch (error) {
+      logger.debug(
+        {
+          err: error,
+          channelId: input.channelId,
+          threadTs: input.threadTs,
+          status: input.status,
+          runId: input.runId,
+          chatThreadId: input.chatThreadId,
+        },
+        "failed to update Slack social-room thread status",
+      );
+    }
   }
 
   async function resolveSlackUserLabel(input: {
@@ -2297,6 +2473,270 @@ export function slackIntegrationService(db: Db) {
       .then((rows) => rows[0] ?? null);
   }
 
+  async function getCompanyChatRoomBySlackChannelId(channelId: string) {
+    return db
+      .select()
+      .from(companyChatRooms)
+      .where(eq(companyChatRooms.slackChannelId, channelId))
+      .then((rows) => (rows[0] ? toCompanyChatRoom(rows[0]) : null));
+  }
+
+  async function ensureCompanyChatRoomChannel(companyId: string): Promise<CompanyChatRoom | null> {
+    const room = await db
+      .select({
+        room: companyChatRooms,
+        companyName: companies.name,
+      })
+      .from(companyChatRooms)
+      .innerJoin(companies, eq(companyChatRooms.companyId, companies.id))
+      .where(eq(companyChatRooms.companyId, companyId))
+      .then((rows) => rows[0] ?? null);
+    if (!room) {
+      throw notFound("Company chat room not found");
+    }
+
+    const desiredChannelName =
+      room.room.slackChannelName?.trim() || normalizeSlackChannelName(`${room.companyName} chat room`) || "company-chat-room";
+
+    const controlBotToken = instanceSettings.getRuntimeSecretValue("slackBotToken");
+    if (!controlBotToken) {
+      return db
+        .update(companyChatRooms)
+        .set({
+          slackChannelName: desiredChannelName,
+          status: room.room.slackChannelId ? room.room.status : "pending",
+          lastError: "SLACK_BOT_TOKEN is not configured.",
+          updatedAt: new Date(),
+        })
+        .where(eq(companyChatRooms.id, room.room.id))
+        .returning()
+        .then((rows) => (rows[0] ? toCompanyChatRoom(rows[0]) : null));
+    }
+
+    const client = new SlackWebClient(controlBotToken);
+    if (room.room.slackChannelId && room.room.status === "active") {
+      if (room.room.slackChannelName !== desiredChannelName) {
+        try {
+          const renamed = await client.renameChannel(room.room.slackChannelId, desiredChannelName);
+          return db
+            .update(companyChatRooms)
+            .set({
+              slackChannelName: renamed.channel.name,
+              status: "active",
+              lastError: null,
+              updatedAt: new Date(),
+            })
+            .where(eq(companyChatRooms.id, room.room.id))
+            .returning()
+            .then((rows) => (rows[0] ? toCompanyChatRoom(rows[0]) : null));
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return db
+            .update(companyChatRooms)
+            .set({
+              lastError: message,
+              updatedAt: new Date(),
+            })
+            .where(eq(companyChatRooms.id, room.room.id))
+            .returning()
+            .then((rows) => (rows[0] ? toCompanyChatRoom(rows[0]) : null));
+        }
+      }
+      return toCompanyChatRoom(room.room);
+    }
+
+    let createdChannel: { id: string; name: string } | null = null;
+    for (let suffix = 1; suffix <= 50; suffix += 1) {
+      const candidateName = suffix === 1 ? desiredChannelName : truncate(`${desiredChannelName}-${suffix}`, 80);
+      try {
+        const created = await client.createChannel({
+          name: candidateName,
+          isPrivate: false,
+        });
+        createdChannel = created.channel;
+        break;
+      } catch (error) {
+        if (error instanceof SlackApiError && error.code === "name_taken") {
+          if (suffix === 1) {
+            try {
+              const archivedMatch = await findArchivedChannelByName(client, candidateName, "public");
+              if (archivedMatch) {
+                try {
+                  await client.unarchiveChannel(archivedMatch.id);
+                } catch (unarchiveError) {
+                  const slackCode = unarchiveError instanceof SlackApiError ? unarchiveError.code : null;
+                  if (slackCode !== "not_archived") throw unarchiveError;
+                }
+                await ensureConfiguredChannelMembers({
+                  client,
+                  channelId: archivedMatch.id,
+                  projectId: room.room.id,
+                });
+                return db
+                  .update(companyChatRooms)
+                  .set({
+                    slackChannelId: archivedMatch.id,
+                    slackChannelName: archivedMatch.name,
+                    status: "active",
+                    lastError: null,
+                    archivedAt: null,
+                    updatedAt: new Date(),
+                  })
+                  .where(eq(companyChatRooms.id, room.room.id))
+                  .returning()
+                  .then((rows) => (rows[0] ? toCompanyChatRoom(rows[0]) : null));
+              }
+            } catch (lookupError) {
+              logger.warn(
+                { err: lookupError, companyId, desiredChannelName: candidateName },
+                "failed to reuse archived Slack social-room channel",
+              );
+            }
+          }
+          continue;
+        }
+
+        const message = error instanceof Error ? error.message : String(error);
+        return db
+          .update(companyChatRooms)
+          .set({
+            slackChannelName: candidateName,
+            status: "error",
+            lastError: message,
+            updatedAt: new Date(),
+          })
+          .where(eq(companyChatRooms.id, room.room.id))
+          .returning()
+          .then((rows) => (rows[0] ? toCompanyChatRoom(rows[0]) : null));
+      }
+    }
+
+    if (!createdChannel) {
+      return db
+        .update(companyChatRooms)
+        .set({
+          slackChannelName: desiredChannelName,
+          status: "error",
+          lastError: "Unable to allocate a unique Slack social-room channel name.",
+          updatedAt: new Date(),
+        })
+        .where(eq(companyChatRooms.id, room.room.id))
+        .returning()
+        .then((rows) => (rows[0] ? toCompanyChatRoom(rows[0]) : null));
+    }
+
+    await ensureConfiguredChannelMembers({
+      client,
+      channelId: createdChannel.id,
+      projectId: room.room.id,
+    });
+
+    return db
+      .update(companyChatRooms)
+      .set({
+        slackChannelId: createdChannel.id,
+        slackChannelName: createdChannel.name,
+        status: "active",
+        lastError: null,
+        archivedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(companyChatRooms.id, room.room.id))
+      .returning()
+      .then((rows) => (rows[0] ? toCompanyChatRoom(rows[0]) : null));
+  }
+
+  async function syncCompanyChatRoom(companyId: string): Promise<CompanyChatRoom | null> {
+    return ensureCompanyChatRoomChannel(companyId);
+  }
+
+  async function postCompanyChatMessage(input: {
+    companyId: string;
+    channelId: string;
+    text: string;
+    threadTs?: string | null;
+    agentId?: string | null;
+  }) {
+    const client = await getAgentPostingClient(input.agentId);
+    if (!client) {
+      throw new Error("No Slack client is configured for company chat room posting");
+    }
+    try {
+      return await client.postMessage({
+        channel: input.channelId,
+        text: input.text,
+        threadTs: input.threadTs ?? null,
+      });
+    } catch (error) {
+      if (input.agentId) {
+        const fallbackClient = await getControlClient();
+        if (fallbackClient) {
+          return fallbackClient.postMessage({
+            channel: input.channelId,
+            text: input.text,
+            threadTs: input.threadTs ?? null,
+          });
+        }
+      }
+      throw error;
+    }
+  }
+
+  async function postCompanyChatReaction(input: {
+    companyId: string;
+    channelId: string;
+    messageTs: string;
+    emoji: string;
+    agentId?: string | null;
+  }) {
+    const client = await getAgentPostingClient(input.agentId);
+    if (!client) {
+      throw new Error("No Slack client is configured for company chat room reactions");
+    }
+    try {
+      await client.addReaction({
+        channel: input.channelId,
+        messageTs: input.messageTs,
+        emoji: input.emoji,
+      });
+    } catch (error) {
+      if (error instanceof SlackApiError && error.code === "already_reacted") {
+        return;
+      }
+      if (input.agentId) {
+        const fallbackClient = await getControlClient();
+        if (fallbackClient) {
+          try {
+            await fallbackClient.addReaction({
+              channel: input.channelId,
+              messageTs: input.messageTs,
+              emoji: input.emoji,
+            });
+            return;
+          } catch (fallbackError) {
+            if (fallbackError instanceof SlackApiError && fallbackError.code === "already_reacted") {
+              return;
+            }
+            throw fallbackError;
+          }
+        }
+      }
+      throw error;
+    }
+  }
+
+  async function setCompanyChatThreadStatus(input: {
+    channelId: string;
+    threadTs: string;
+    status: string;
+  }) {
+    await setSlackThreadStatusBestEffort({
+      channelId: input.channelId,
+      threadTs: input.threadTs,
+      status: input.status,
+    });
+  }
+
   async function getThreadLinkByIssue(issueId: string) {
     return db
       .select()
@@ -2623,16 +3063,134 @@ function parseApprovalDecision(text: string): "once" | "always" | "reject" | nul
       .select({
         id: heartbeatRuns.id,
         companyId: heartbeatRuns.companyId,
-        issueId: heartbeatRuns.contextSnapshot,
+        contextSnapshot: heartbeatRuns.contextSnapshot,
       })
       .from(heartbeatRuns)
       .where(eq(heartbeatRuns.id, runId))
       .then((rows) => rows[0] ?? null);
     if (!run) return null;
-    const context = parseObject(run.issueId);
+    const context = parseObject(run.contextSnapshot);
     const issueId = readNonEmptyString(context.issueId);
     if (!issueId) return null;
     return issuesSvc.getById(issueId);
+  }
+
+  async function resolveSocialRoomThreadForRun(runId: string) {
+    const run = await db
+      .select({
+        companyId: heartbeatRuns.companyId,
+        contextSnapshot: heartbeatRuns.contextSnapshot,
+      })
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.id, runId))
+      .then((rows) => rows[0] ?? null);
+    if (!run) return null;
+    const context = parseObject(run.contextSnapshot);
+    const chatThreadId = readNonEmptyString(context.chatThreadId);
+    if (!chatThreadId) return null;
+    const thread = await socialRooms.getThreadById(chatThreadId);
+    if (!thread?.slackChannelId || !thread.slackThreadTs) return null;
+    return {
+      companyId: run.companyId,
+      chatThreadId,
+      channelId: thread.slackChannelId,
+      threadTs: thread.slackThreadTs,
+    };
+  }
+
+  async function listActiveSocialRoomResponders(input: {
+    companyId: string;
+    chatThreadId: string;
+  }) {
+    const activeRuns = await db
+      .select({
+        agentId: heartbeatRuns.agentId,
+        runStatus: heartbeatRuns.status,
+        agentName: agents.name,
+      })
+      .from(heartbeatRuns)
+      .leftJoin(agents, eq(heartbeatRuns.agentId, agents.id))
+      .where(
+        and(
+          eq(heartbeatRuns.companyId, input.companyId),
+          inArray(heartbeatRuns.status, ["queued", "running"]),
+          sql`${heartbeatRuns.contextSnapshot} ->> 'chatThreadId' = ${input.chatThreadId}`,
+        ),
+      );
+
+    const deduped = new Map<string, SocialRoomProgressResponder>();
+    for (const row of activeRuns) {
+      const agentName = readNonEmptyString(row.agentName) ?? "Agent";
+      const key = readNonEmptyString(row.agentId) ?? agentName;
+      const nextResponder = {
+        agentName,
+        runStatus: readNonEmptyString(row.runStatus) ?? "queued",
+      } satisfies SocialRoomProgressResponder;
+      const existing = deduped.get(key);
+      if (!existing || (existing.runStatus !== "running" && nextResponder.runStatus === "running")) {
+        deduped.set(key, nextResponder);
+      }
+    }
+
+    return Array.from(deduped.values()).sort((left, right) => {
+      if (left.runStatus === right.runStatus) {
+        return left.agentName.localeCompare(right.agentName);
+      }
+      return left.runStatus === "running" ? -1 : 1;
+    });
+  }
+
+  async function refreshCompanyChatThreadStatus(input: {
+    threadId: string;
+    fallbackStatus?: string | null;
+  }) {
+    const thread = await db
+      .select({
+        id: companyChatThreads.id,
+        companyId: companyChatThreads.companyId,
+        status: companyChatThreads.status,
+        followOnDueAt: companyChatThreads.followOnDueAt,
+        slackChannelId: companyChatThreads.slackChannelId,
+        slackThreadTs: companyChatThreads.slackThreadTs,
+      })
+      .from(companyChatThreads)
+      .where(eq(companyChatThreads.id, input.threadId))
+      .then((rows) => rows[0] ?? null);
+    if (!thread?.slackChannelId || !thread.slackThreadTs) {
+      return;
+    }
+
+    const activeResponders = await listActiveSocialRoomResponders({
+      companyId: thread.companyId,
+      chatThreadId: thread.id,
+    });
+    const status = formatSocialRoomThreadProgressStatus({
+      activeResponders,
+      followOnPending:
+        thread.status === "active" &&
+        Boolean(thread.followOnDueAt && thread.followOnDueAt.getTime() > Date.now()),
+      fallbackStatus: input.fallbackStatus ?? null,
+    });
+
+    await setSlackThreadStatusBestEffort({
+      channelId: thread.slackChannelId,
+      threadTs: thread.slackThreadTs,
+      status,
+      chatThreadId: thread.id,
+    });
+  }
+
+  async function forwardSocialRoomRunEventStatus(event: LiveEvent) {
+    if (event.type !== "heartbeat.run.queued" && event.type !== "heartbeat.run.status") {
+      return;
+    }
+    const runId = readNonEmptyString(event.payload.runId);
+    if (!runId) return;
+    const socialThread = await resolveSocialRoomThreadForRun(runId);
+    if (!socialThread) return;
+    await refreshCompanyChatThreadStatus({
+      threadId: socialThread.chatThreadId,
+    });
   }
 
   async function forwardIssueCreated(issue: SlackIssue) {
@@ -2758,6 +3316,10 @@ function parseApprovalDecision(text: string): "once" | "always" | "reject" | nul
         event.type !== "heartbeat.run.event"
       ) {
         return;
+      }
+
+      if (event.type === "heartbeat.run.queued" || event.type === "heartbeat.run.status") {
+        await forwardSocialRoomRunEventStatus(event);
       }
 
       const issue = await resolveIssueForLiveEvent(event);
@@ -3183,10 +3745,11 @@ function parseApprovalDecision(text: string): "once" | "always" | "reject" | nul
     const channelId = readNonEmptyString(envelope.event.channel);
     if (!channelId) return;
 
+    const companyChatRoom = await getCompanyChatRoomBySlackChannelId(channelId);
     const projectChannel = await getProjectSlackChannelBySlackChannelId(channelId);
     const accepted = await markSlackEventReceived({
       eventId: envelope.event_id,
-      companyId: projectChannel?.companyId ?? null,
+      companyId: companyChatRoom?.companyId ?? projectChannel?.companyId ?? null,
       eventType: envelope.event.type,
       apiAppId: envelope.api_app_id ?? null,
     });
@@ -3198,8 +3761,8 @@ function parseApprovalDecision(text: string): "once" | "always" | "reject" | nul
       envelope.event.type !== "message" ||
       envelope.event.subtype ||
       envelope.event.bot_id ||
-      !projectChannel ||
-      projectChannel.status !== "active"
+      (companyChatRoom ? companyChatRoom.status !== "active" || !companyChatRoom.enabled : false) &&
+      (!projectChannel || projectChannel.status !== "active")
     ) {
       return;
     }
@@ -3208,6 +3771,38 @@ function parseApprovalDecision(text: string): "once" | "always" | "reject" | nul
     if (!threadTs) return;
 
     const isThreadReply = Boolean(envelope.event.thread_ts && envelope.event.thread_ts !== envelope.event.ts);
+    const normalizedText = collapseWhitespace(stripLeadingSlackMentions(envelope.event.text ?? ""));
+    if (!normalizedText) return;
+
+    if (companyChatRoom && companyChatRoom.status === "active" && companyChatRoom.enabled) {
+      await setSlackThreadStatusBestEffort({
+        channelId,
+        threadTs,
+        status: "Selecting responders...",
+      });
+      const socialResult = isThreadReply
+        ? await socialRooms.handleIncomingSlackReply({
+            companyId: companyChatRoom.companyId,
+            channelId,
+            threadTs,
+            messageTs: readNonEmptyString(envelope.event.ts) ?? threadTs,
+            text: envelope.event.text ?? "",
+          })
+        : await socialRooms.handleIncomingSlackRootMessage({
+            companyId: companyChatRoom.companyId,
+            channelId,
+            threadTs,
+            messageTs: readNonEmptyString(envelope.event.ts) ?? threadTs,
+            text: envelope.event.text ?? "",
+          });
+      await refreshCompanyChatThreadStatus({
+        threadId: socialResult.thread.id,
+        fallbackStatus:
+          socialResult.wakeSelection?.selectedAgentIds.length === 0 ? "No responders selected yet." : null,
+      });
+      return;
+    }
+
     if (isThreadReply) {
       const approvalResult = await handleApprovalThreadMessage({
         channelId,
@@ -3219,9 +3814,6 @@ function parseApprovalDecision(text: string): "once" | "always" | "reject" | nul
         return;
       }
     }
-
-    const normalizedText = collapseWhitespace(stripLeadingSlackMentions(envelope.event.text ?? ""));
-    if (!normalizedText) return;
 
     const threadLink = isThreadReply
       ? await getThreadLinkBySlackThread(channelId, threadTs)
@@ -3993,6 +4585,71 @@ function parseApprovalDecision(text: string): "once" | "always" | "reject" | nul
     startLiveEventForwarder,
     handleSlackControlEvent,
 
+    async syncAgentAppDisplayName(agentId: string) {
+      const agent = await getAgentRow(agentId);
+      if (!agent) throw notFound("Agent not found");
+
+      const existing = await getAgentSlackApp(agentId);
+      const slackAppId = readNonEmptyString(existing?.slackAppId);
+      if (!existing || !slackAppId) {
+        return { synced: false, reason: "not_provisioned" as const };
+      }
+
+      const manifestToken = instanceSettings.getRuntimeSecretValue("slackManifestToken");
+      if (!manifestToken) {
+        await upsertAgentSlackApp(agentId, {
+          lastError: "SLACK_APP_MANIFEST_TOKEN is not configured.",
+        });
+        return { synced: false, reason: "manifest_token_missing" as const };
+      }
+
+      try {
+        const exported = await slackManifestExport({
+          manifestToken,
+          appId: slackAppId,
+        });
+        const manifest = parseObject(exported.manifest);
+        const displayInformation = parseObject(manifest.display_information);
+        const features = parseObject(manifest.features);
+        const botUser = parseObject(features.bot_user);
+
+        displayInformation.name = buildSlackAppName(agent.name);
+        botUser.display_name = buildSlackBotDisplayName(agent.name);
+        if (typeof botUser.always_online !== "boolean") {
+          botUser.always_online = false;
+        }
+
+        manifest.display_information = displayInformation;
+        features.bot_user = botUser;
+        manifest.features = features;
+
+        await slackManifestUpdate({
+          manifestToken,
+          appId: slackAppId,
+          manifest,
+        });
+
+        await upsertAgentSlackApp(agentId, { lastError: null });
+        return { synced: true as const };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await upsertAgentSlackApp(agentId, { lastError: message });
+        logger.warn(
+          {
+            err: error,
+            agentId,
+            slackAppId,
+          },
+          "failed to sync Slack app display name",
+        );
+        return {
+          synced: false as const,
+          reason: "sync_failed" as const,
+          error: message,
+        };
+      }
+    },
+
     async provisionAgentApp(agentId: string, actor?: ActorRef) {
       const agent = await getAgentRow(agentId);
       if (!agent) throw notFound("Agent not found");
@@ -4120,8 +4777,14 @@ function parseApprovalDecision(text: string): "once" | "always" | "reject" | nul
     ensureProjectChannel,
     archiveProjectChannel,
     syncProjectSlack,
+    syncCompanyChatRoom,
     listProjectSlackState,
     syncAgentProjectMemberships,
+    getCompanyChatRoomBySlackChannelId,
+    postCompanyChatMessage,
+    postCompanyChatReaction,
+    setCompanyChatThreadStatus,
+    refreshCompanyChatThreadStatus,
     getThreadLinkByIssue,
     postHostCommandFallbackApprovalMessage,
     handleApprovalThreadMessage,

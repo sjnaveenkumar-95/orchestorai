@@ -23,6 +23,7 @@ import { createLocalAgentJwt } from "../agent-auth-jwt.js";
 import { parseObject, asBoolean, asNumber, appendWithCap, MAX_EXCERPT_BYTES } from "../adapters/utils.js";
 import { secretService } from "./secrets.js";
 import { resolveDefaultAgentWorkspaceDir } from "../home-paths.js";
+import { resolveSocialRoomOverlayForRun } from "../social-room/prompt-overlay.js";
 
 const MAX_LIVE_LOG_CHUNK_BYTES = 8 * 1024;
 const HEARTBEAT_MAX_CONCURRENT_RUNS_DEFAULT = 1;
@@ -1146,6 +1147,7 @@ export function heartbeatService(db: Db) {
     let handle: RunLogHandle | null = null;
     let stdoutExcerpt = "";
     let stderrExcerpt = "";
+    let overlayCleanup: (() => Promise<void>) | null = null;
 
     try {
       const startedAt = run.startedAt ?? new Date();
@@ -1237,9 +1239,22 @@ export function heartbeatService(db: Db) {
       }
 
       const config = parseObject(agent.adapterConfig);
-      const mergedConfig = issueAssigneeOverrides?.adapterConfig
+      const mergedConfigBase = issueAssigneeOverrides?.adapterConfig
         ? { ...config, ...issueAssigneeOverrides.adapterConfig }
         : config;
+      const socialRoomOverlay = await resolveSocialRoomOverlayForRun({
+        db,
+        agent,
+        baseConfig: mergedConfigBase,
+        context,
+      });
+      overlayCleanup = socialRoomOverlay?.cleanup ?? null;
+      const mergedConfig = socialRoomOverlay
+        ? {
+            ...mergedConfigBase,
+            instructionsFilePath: socialRoomOverlay.instructionsFilePath,
+          }
+        : mergedConfigBase;
       const resolvedConfig = await secretsSvc.resolveAdapterConfigForRuntime(
         agent.companyId,
         mergedConfig,
@@ -1455,6 +1470,11 @@ export function heartbeatService(db: Db) {
 
       await finalizeAgentStatus(agent.id, "failed");
     } finally {
+      if (overlayCleanup) {
+        await overlayCleanup().catch((error) => {
+          logger.warn({ err: error, runId }, "failed to clean up social-room overlay");
+        });
+      }
       await startNextQueuedRunForAgent(agent.id);
     }
   }

@@ -59,6 +59,23 @@ export {
   type CreateProjectMember,
 } from "./project-member.js";
 export {
+  companyChatTopicSchema,
+  updateCompanyChatRoomSchema,
+  updateCompanyChatPromptPackSchema,
+  createCompanyChatThreadSchema,
+  createCompanyChatMessageSchema,
+  createCompanyChatReactionSchema,
+  companyChatThreadStatusSchema,
+  companyChatThreadOriginSchema,
+  companyChatMessageAuthorTypeSchema,
+  type CompanyChatTopicInput,
+  type UpdateCompanyChatRoom,
+  type UpdateCompanyChatPromptPack,
+  type CreateCompanyChatThread,
+  type CreateCompanyChatMessage,
+  type CreateCompanyChatReaction,
+} from "./company-chat.js";
+export {
   SLACK_CONTROL_ACTION_TYPES,
   slackControlInterpreterMutationSchema,
   slackControlInterpreterResultSchema,

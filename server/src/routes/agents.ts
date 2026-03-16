@@ -962,6 +962,12 @@ export function agentRoutes(db: Db) {
     }
 
     const actor = getActorInfo(req);
+    const requestedName = typeof patchData.name === "string" ? patchData.name.trim() : null;
+    const shouldSyncSlackName = Boolean(
+      Object.prototype.hasOwnProperty.call(patchData, "name") &&
+      requestedName &&
+      requestedName.length > 0,
+    );
     const agent = await svc.update(id, patchData, {
       recordRevision: {
         createdByAgentId: actor.agentId,
@@ -985,6 +991,19 @@ export function agentRoutes(db: Db) {
       entityId: agent.id,
       details: summarizeAgentUpdateDetails(patchData),
     });
+
+    if (shouldSyncSlackName) {
+      const syncResult = await slackSvc.syncAgentAppDisplayName(agent.id);
+      if (!syncResult.synced && syncResult.reason === "sync_failed") {
+        logger.warn(
+          {
+            agentId: agent.id,
+            error: syncResult.error,
+          },
+          "agent rename saved but Slack app display name sync failed",
+        );
+      }
+    }
 
     res.json(agent);
   });

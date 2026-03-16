@@ -27,6 +27,15 @@ export type {
   SlackThreadLink,
 } from "./slack.js";
 export type {
+  CompanyChatRoom,
+  CompanyChatPromptPack,
+  CompanyChatTopic,
+  CompanyChatThread,
+  CompanyChatMessage,
+  CompanyChatReaction,
+  CompanyChatParticipation,
+} from "./company-chat.js";
+export type {
   SlackControlActionType,
   SlackControlInterpreterMutation,
   SlackControlInterpreterResult,

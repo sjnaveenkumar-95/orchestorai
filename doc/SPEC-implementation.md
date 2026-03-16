@@ -35,7 +35,7 @@ These decisions close open questions from `SPEC.md` for V1.
 | Board | Single human board operator per deployment |
 | Org graph | Strict tree (`reports_to` nullable root); no multi-manager reporting |
 | Visibility | Full visibility to board and all agents in same company |
-| Communication | Tasks + comments only (no separate chat system) |
+| Communication | Tasks + comments for work coordination; optional company social-room chat exists outside task workflow |
 | Task ownership | Single assignee; atomic checkout required for `in_progress` transition |
 | Recovery | No automatic reassignment; stale work is surfaced, not silently fixed |
 | Agent adapters | Built-in `process` and `http` adapters |

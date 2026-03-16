@@ -47,6 +47,10 @@ export class OrchestorAIClient {
       expiresAt: 0,
       value: [],
     };
+    this.companyChatRoomCache = {
+      expiresAt: 0,
+      value: null,
+    };
     this.issueCache = {
       expiresAt: 0,
       key: "",
@@ -224,6 +228,36 @@ export class OrchestorAIClient {
         );
       }) || null
     );
+  }
+
+  async getCompanyChatRoom(options = {}) {
+    const force = Boolean(options.force);
+    if (!force && this.companyChatRoomCache.expiresAt > Date.now()) {
+      return this.companyChatRoomCache.value;
+    }
+    const room = await this.requestJson("GET", `/api/companies/${this.companyId}/chat-room`);
+    const value = room && typeof room === "object" ? room : null;
+    this.companyChatRoomCache = {
+      expiresAt: Date.now() + 60 * 1000,
+      value,
+    };
+    return value;
+  }
+
+  async getManagedCompanyChatRoom(channelId, options = {}) {
+    const normalizedChannelId = String(channelId || "").trim();
+    if (!normalizedChannelId) {
+      return null;
+    }
+    const room = await this.getCompanyChatRoom(options);
+    if (!room) {
+      return null;
+    }
+    return String(room?.slackChannelId || "").trim() === normalizedChannelId &&
+      String(room?.status || "").trim().toLowerCase() === "active" &&
+      Boolean(room?.enabled)
+      ? room
+      : null;
   }
 
   buildIssueQuery(options = {}) {

@@ -14,6 +14,7 @@ import { queryKeys } from "../lib/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Settings, Check } from "lucide-react";
 import { CompanyPatternIcon } from "../components/CompanyPatternIcon";
+import { SocialRoomSettingsSection } from "../components/SocialRoomSettingsSection";
 import {
   Field,
   ToggleField,
@@ -604,6 +605,11 @@ export function CompanySettings() {
           )}
         </div>
       </div>
+
+      <SocialRoomSettingsSection
+        companyId={selectedCompany.id}
+        companyName={selectedCompany.name}
+      />
 
       {/* Hiring */}
       <div className="space-y-4">

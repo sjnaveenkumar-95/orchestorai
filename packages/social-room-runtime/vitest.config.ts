@@ -2,6 +2,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    projects: ["packages/db", "packages/social-room-runtime", "server", "ui", "cli"],
+    environment: "node",
+    include: ["src/**/*.test.ts"],
   },
 });

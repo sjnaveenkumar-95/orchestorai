@@ -36,6 +36,7 @@
     "@orchestorai/adapter-openclaw": "workspace:*",
     "@orchestorai/adapter-utils": "workspace:*",
     "@orchestorai/db": "workspace:*",
+    "@orchestorai/social-room-runtime": "workspace:*",
     "@orchestorai/shared": "workspace:*",
     "better-auth": "1.4.18",
     "detect-port": "^2.1.0",

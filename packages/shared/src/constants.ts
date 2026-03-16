@@ -134,6 +134,24 @@ export type AgentSlackAppInstallStatus = (typeof AGENT_SLACK_APP_INSTALL_STATUSE
 export const PROJECT_SLACK_CHANNEL_STATUSES = ["pending", "active", "error", "archived"] as const;
 export type ProjectSlackChannelStatus = (typeof PROJECT_SLACK_CHANNEL_STATUSES)[number];
 
+export const COMPANY_CHAT_ROOM_STATUSES = ["pending", "active", "error", "archived"] as const;
+export type CompanyChatRoomStatus = (typeof COMPANY_CHAT_ROOM_STATUSES)[number];
+
+export const COMPANY_CHAT_THREAD_STATUSES = ["active", "closed", "parked"] as const;
+export type CompanyChatThreadStatus = (typeof COMPANY_CHAT_THREAD_STATUSES)[number];
+
+export const COMPANY_CHAT_THREAD_ORIGINS = ["human", "agent", "system"] as const;
+export type CompanyChatThreadOrigin = (typeof COMPANY_CHAT_THREAD_ORIGINS)[number];
+
+export const COMPANY_CHAT_COMPLETION_ASSESSMENTS = ["done", "ongoing", "unclear"] as const;
+export type CompanyChatCompletionAssessment = (typeof COMPANY_CHAT_COMPLETION_ASSESSMENTS)[number];
+
+export const COMPANY_CHAT_MESSAGE_AUTHOR_TYPES = ["user", "agent", "system"] as const;
+export type CompanyChatMessageAuthorType = (typeof COMPANY_CHAT_MESSAGE_AUTHOR_TYPES)[number];
+
+export const COMPANY_CHAT_MESSAGE_SOURCES = ["slack", "api", "agent", "system"] as const;
+export type CompanyChatMessageSource = (typeof COMPANY_CHAT_MESSAGE_SOURCES)[number];
+
 export const PROJECT_SLACK_MEMBERSHIP_SYNC_STATUSES = [
   "pending",
   "active",

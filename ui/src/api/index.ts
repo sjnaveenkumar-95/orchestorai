@@ -15,3 +15,4 @@ export { dashboardApi } from "./dashboard";
 export { heartbeatsApi } from "./heartbeats";
 export { sidebarBadgesApi } from "./sidebarBadges";
 export { instanceApi } from "./instance";
+export { socialRoomApi } from "./socialRoom";

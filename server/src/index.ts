@@ -25,7 +25,7 @@ import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { logger } from "./middleware/logger.js";
 import { setupLiveEventsWebSocketServer } from "./realtime/live-events-ws.js";
-import { heartbeatService } from "./services/index.js";
+import { heartbeatService, socialRoomService } from "./services/index.js";
 import { createStorageServiceFromConfig } from "./storage/index.js";
 import { printStartupBanner } from "./startup-banner.js";
 import { getBoardClaimWarningUrl, initializeBoardClaimChallenge } from "./board-claim.js";
@@ -550,6 +550,7 @@ setupLiveEventsWebSocketServer(server, db as any, {
 
 if (config.heartbeatSchedulerEnabled) {
   const heartbeat = heartbeatService(db as any);
+  const socialRooms = socialRoomService(db as any);
 
   // Reap orphaned runs at startup (no threshold -- runningProcesses is empty)
   void heartbeat.reapOrphanedRuns().catch((err) => {
@@ -568,6 +569,17 @@ if (config.heartbeatSchedulerEnabled) {
         logger.error({ err }, "heartbeat timer tick failed");
       });
 
+    void socialRooms
+      .tickAutonomousRooms(new Date())
+      .then((result) => {
+        if (result.initiated > 0) {
+          logger.info({ ...result }, "social-room timer tick initiated autonomous wakes");
+        }
+      })
+      .catch((err) => {
+        logger.error({ err }, "social-room timer tick failed");
+      });
+
     // Periodically reap orphaned runs (5-min staleness threshold)
     void heartbeat
       .reapOrphanedRuns({ staleThresholdMs: 5 * 60 * 1000 })
@@ -575,6 +587,19 @@ if (config.heartbeatSchedulerEnabled) {
         logger.error({ err }, "periodic reap of orphaned heartbeat runs failed");
       });
   }, config.heartbeatSchedulerIntervalMs);
+
+  setInterval(() => {
+    void socialRooms
+      .tickFollowOnThreads(new Date())
+      .then((result) => {
+        if (result.woken > 0) {
+          logger.info({ ...result }, "social-room follow-on tick woke responders");
+        }
+      })
+      .catch((err) => {
+        logger.error({ err }, "social-room follow-on tick failed");
+      });
+  }, 5_000);
 }
 
 if (config.databaseBackupEnabled) {

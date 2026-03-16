@@ -757,6 +757,58 @@ export class SlackRuntime {
     }
   }
 
+  async getManagedOrchestorAICompanyChatRoom(channelId) {
+    if (!this.isOrchestorAIEnabled() || !channelId) {
+      return null;
+    }
+
+    try {
+      return await this.orchestoraiClient.getManagedCompanyChatRoom(channelId);
+    } catch (err) {
+      this.log("debug", `managed company chat lookup skipped for ${channelId}: ${String(err)}`);
+      return null;
+    }
+  }
+
+  async maybeForwardManagedCompanyChatRoomEvent({ event, body, channelType }) {
+    if (channelType !== "channel" && channelType !== "group") {
+      return false;
+    }
+
+    const managedRoom = await this.getManagedOrchestorAICompanyChatRoom(event.channel);
+    if (!managedRoom) {
+      return false;
+    }
+
+    if (this.markSeen(event.channel, event.ts)) {
+      this.log("debug", `drop: duplicate managed-company-chat event ${event.channel}:${event.ts}`);
+      return true;
+    }
+
+    try {
+      await this.orchestoraiClient.forwardSlackControlEvent(
+        buildManagedSlackControlEnvelope(event, body),
+        {
+          botToken: this.config.slack.botToken,
+        },
+      );
+      this.log(
+        "debug",
+        `forwarded managed company-chat message to OrchestorAI control channel=${event.channel} room=${managedRoom.displayName || managedRoom.id || "unknown"} thread=${event.thread_ts || event.ts || "none"}`,
+      );
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      this.log("error", `managed company-chat forward failed: ${reason}`);
+      await this.postOrchestorAIThreadReply(
+        event.channel,
+        event.thread_ts || event.ts,
+        `OrchestorAI company chat handoff failed: ${reason}`,
+      );
+    }
+
+    return true;
+  }
+
   async maybeForwardManagedProjectChannelEvent({ event, body, channelType }) {
     if (channelType !== "channel" && channelType !== "group") {
       return false;
@@ -3054,6 +3106,14 @@ export class SlackRuntime {
       }
 
       const channelType = normalizeChannelType(normalized.channel_type, normalized.channel);
+      const handledByManagedCompanyChatForwarder = await this.maybeForwardManagedCompanyChatRoomEvent({
+        event: normalized,
+        body,
+        channelType,
+      });
+      if (handledByManagedCompanyChatForwarder) {
+        return;
+      }
       const handledByManagedChannelForwarder = await this.maybeForwardManagedProjectChannelEvent({
         event: normalized,
         body,
@@ -3074,6 +3134,14 @@ export class SlackRuntime {
         return;
       }
       const channelType = normalizeChannelType(event.channel_type, event.channel);
+      const handledByManagedCompanyChatForwarder = await this.maybeForwardManagedCompanyChatRoomEvent({
+        event,
+        body,
+        channelType,
+      });
+      if (handledByManagedCompanyChatForwarder) {
+        return;
+      }
       const handledByManagedChannelForwarder = await this.maybeForwardManagedProjectChannelEvent({
         event,
         body,
