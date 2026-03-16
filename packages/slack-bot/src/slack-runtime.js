@@ -105,7 +105,35 @@ function toSlackEventTimestampSeconds(value) {
   return Math.max(0, Math.floor(parsed));
 }
 
-function buildManagedSlackControlEnvelope(event, body) {
+function buildManagedSlackControlFiles(files) {
+  if (!Array.isArray(files) || files.length === 0) {
+    return undefined;
+  }
+
+  const normalized = files
+    .slice(0, MAX_ATTACHMENT_FILES)
+    .map((file) => {
+      if (!file || typeof file !== "object") {
+        return null;
+      }
+
+      return {
+        id: typeof file.id === "string" ? file.id : undefined,
+        name: typeof file.name === "string" ? file.name : undefined,
+        title: typeof file.title === "string" ? file.title : undefined,
+        mimetype: typeof file.mimetype === "string" ? file.mimetype : undefined,
+        filetype: typeof file.filetype === "string" ? file.filetype : undefined,
+        pretty_type: typeof file.pretty_type === "string" ? file.pretty_type : undefined,
+        size: typeof file.size === "number" && Number.isFinite(file.size) ? file.size : undefined,
+        permalink: typeof file.permalink === "string" ? file.permalink : undefined,
+      };
+    })
+    .filter(Boolean);
+
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+export function buildManagedSlackControlEnvelope(event, body) {
   const eventId = String(body?.event_id || "").trim();
   const messageTs = String(event?.ts || "").trim();
   const threadTs = String(event?.thread_ts || "").trim();
@@ -130,6 +158,7 @@ function buildManagedSlackControlEnvelope(event, body) {
       user: event?.user,
       bot_id: event?.bot_id,
       subtype: event?.subtype,
+      files: buildManagedSlackControlFiles(event?.files),
     },
   };
 }
