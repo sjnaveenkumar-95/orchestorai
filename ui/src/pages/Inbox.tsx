@@ -44,6 +44,7 @@ import type { ApprovalResolutionMode, HeartbeatRun, Issue, JoinRequest } from "@
 
 const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
 const RECENT_ISSUES_LIMIT = 100;
+const INBOX_HEARTBEAT_RUN_LIMIT = 100;
 const FAILED_RUN_STATUSES = new Set(["failed", "timed_out"]);
 const ACTIONABLE_APPROVAL_STATUSES = new Set(["pending", "revision_requested"]);
 
@@ -351,8 +352,8 @@ export function Inbox() {
   });
 
   const { data: heartbeatRuns, isLoading: isRunsLoading } = useQuery({
-    queryKey: queryKeys.heartbeats(selectedCompanyId!),
-    queryFn: () => heartbeatsApi.list(selectedCompanyId!),
+    queryKey: queryKeys.heartbeats(selectedCompanyId!, undefined, INBOX_HEARTBEAT_RUN_LIMIT),
+    queryFn: () => heartbeatsApi.list(selectedCompanyId!, undefined, INBOX_HEARTBEAT_RUN_LIMIT),
     enabled: !!selectedCompanyId,
   });
 

@@ -35,6 +35,7 @@ const roleLabels: Record<string, string> = {
 };
 
 type FilterTab = "all" | "active" | "paused" | "error";
+const AGENTS_HEARTBEAT_RUN_LIMIT = 50;
 
 function matchesFilter(status: string, tab: FilterTab, showTerminated: boolean): boolean {
   if (status === "terminated") return showTerminated;
@@ -87,8 +88,8 @@ export function Agents() {
   });
 
   const { data: runs } = useQuery({
-    queryKey: queryKeys.heartbeats(selectedCompanyId!),
-    queryFn: () => heartbeatsApi.list(selectedCompanyId!),
+    queryKey: queryKeys.heartbeats(selectedCompanyId!, undefined, AGENTS_HEARTBEAT_RUN_LIMIT),
+    queryFn: () => heartbeatsApi.list(selectedCompanyId!, undefined, AGENTS_HEARTBEAT_RUN_LIMIT),
     enabled: !!selectedCompanyId,
     refetchInterval: 15_000,
   });

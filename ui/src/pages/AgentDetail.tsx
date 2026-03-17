@@ -176,6 +176,7 @@ function scrollToContainerBottom(container: ScrollContainer, behavior: ScrollBeh
 }
 
 type AgentDetailView = "overview" | "configure" | "runs";
+const AGENT_DETAIL_HEARTBEAT_RUN_LIMIT = 200;
 
 function parseAgentDetailView(value: string | null): AgentDetailView {
   if (value === "configure" || value === "configuration") return "configure";
@@ -277,8 +278,16 @@ export function AgentDetail() {
   });
 
   const { data: heartbeats } = useQuery({
-    queryKey: queryKeys.heartbeats(resolvedCompanyId!, agent?.id ?? undefined),
-    queryFn: () => heartbeatsApi.list(resolvedCompanyId!, agent?.id ?? undefined),
+    queryKey: queryKeys.heartbeats(
+      resolvedCompanyId!,
+      agent?.id ?? undefined,
+      AGENT_DETAIL_HEARTBEAT_RUN_LIMIT,
+    ),
+    queryFn: () => heartbeatsApi.list(
+      resolvedCompanyId!,
+      agent?.id ?? undefined,
+      AGENT_DETAIL_HEARTBEAT_RUN_LIMIT,
+    ),
     enabled: !!resolvedCompanyId && !!agent?.id,
   });
 
