@@ -5,6 +5,7 @@ import type { Db } from "@orchestorai/db";
 
 const mockGetById = vi.fn();
 const mockUpdate = vi.fn();
+const mockHeartbeatList = vi.fn();
 const mockSyncAgentAppDisplayName = vi.fn();
 const mockLogActivity = vi.fn();
 
@@ -19,7 +20,9 @@ vi.mock("../services/index.js", () => ({
     hasPermission: vi.fn(),
   }),
   approvalService: () => ({}),
-  heartbeatService: () => ({}),
+  heartbeatService: () => ({
+    list: mockHeartbeatList,
+  }),
   issueApprovalService: () => ({}),
   issueService: () => ({}),
   logActivity: (...args: unknown[]) => mockLogActivity(...args),
@@ -61,6 +64,7 @@ describe("agentRoutes PATCH /agents/:id", () => {
   beforeEach(() => {
     mockGetById.mockReset();
     mockUpdate.mockReset();
+    mockHeartbeatList.mockReset();
     mockSyncAgentAppDisplayName.mockReset();
     mockLogActivity.mockReset();
   });
@@ -144,5 +148,33 @@ describe("agentRoutes PATCH /agents/:id", () => {
     expect(res.status).toBe(200);
     expect(mockSyncAgentAppDisplayName).toHaveBeenCalledTimes(1);
     expect(mockSyncAgentAppDisplayName).toHaveBeenCalledWith(agentId);
+  });
+});
+
+describe("agentRoutes GET /companies/:companyId/heartbeat-runs", () => {
+  const companyId = "22222222-2222-4222-8222-222222222222";
+
+  beforeEach(() => {
+    mockHeartbeatList.mockReset();
+  });
+
+  it("applies a default capped limit when limit is omitted", async () => {
+    mockHeartbeatList.mockResolvedValue([]);
+
+    const res = await request(createTestApp()).get(`/api/companies/${companyId}/heartbeat-runs`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+    expect(mockHeartbeatList).toHaveBeenCalledTimes(1);
+    expect(mockHeartbeatList).toHaveBeenCalledWith(companyId, undefined, 200);
+  });
+
+  it("preserves explicit limit requests within the cap", async () => {
+    mockHeartbeatList.mockResolvedValue([]);
+
+    const res = await request(createTestApp()).get(`/api/companies/${companyId}/heartbeat-runs?limit=25`);
+
+    expect(res.status).toBe(200);
+    expect(mockHeartbeatList).toHaveBeenCalledWith(companyId, undefined, 25);
   });
 });

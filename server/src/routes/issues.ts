@@ -24,7 +24,7 @@ import {
   projectService,
 } from "../services/index.js";
 import { logger } from "../middleware/logger.js";
-import { forbidden, HttpError, unauthorized } from "../errors.js";
+import { forbidden, HttpError, unauthorized, unprocessable } from "../errors.js";
 import { assertCompanyAccess, getActorInfo } from "./authz.js";
 
 const MAX_ATTACHMENT_BYTES = Number(process.env.ORCHESTORAI_ATTACHMENT_MAX_BYTES) || 10 * 1024 * 1024;
@@ -35,6 +35,20 @@ const ALLOWED_ATTACHMENT_CONTENT_TYPES = new Set([
   "image/webp",
   "image/gif",
 ]);
+
+function parseAssignDirective(body: string): { agentReference: string } | null {
+  const firstNonEmptyLine = body
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  if (!firstNonEmptyLine) return null;
+
+  const match = /^\/assign\s+@(.+?)\s*$/.exec(firstNonEmptyLine);
+  if (!match) return null;
+
+  const agentReference = match[1]?.trim();
+  return agentReference ? { agentReference } : null;
+}
 
 export function issueRoutes(db: Db, storage: StorageService) {
   const router = Router();
@@ -437,18 +451,41 @@ export function issueRoutes(db: Db, storage: StorageService) {
       return;
     }
     assertCompanyAccess(req, existing.companyId);
+    const commentBodyRaw = typeof req.body.comment === "string" ? req.body.comment : null;
+    const assignDirective = commentBodyRaw ? parseAssignDirective(commentBodyRaw) : null;
+    let directiveAssigneeAgentId: string | undefined;
+    if (assignDirective) {
+      if (req.body.assigneeAgentId !== undefined || req.body.assigneeUserId !== undefined) {
+        throw unprocessable("Comment /assign cannot be combined with explicit assignee fields");
+      }
+      const resolved = await agentsSvc.resolveByReference(existing.companyId, assignDirective.agentReference);
+      if (resolved.ambiguous) {
+        throw unprocessable("Assignment directive matches multiple agents. Use a unique agent shortname.");
+      }
+      if (!resolved.agent) {
+        throw unprocessable("Assignment directive target not found.");
+      }
+      directiveAssigneeAgentId = resolved.agent.id;
+    }
+    const effectiveBody = directiveAssigneeAgentId
+      ? {
+        ...req.body,
+        assigneeAgentId: directiveAssigneeAgentId,
+        assigneeUserId: null,
+      }
+      : req.body;
     const assigneeWillChange =
-      (req.body.assigneeAgentId !== undefined && req.body.assigneeAgentId !== existing.assigneeAgentId) ||
-      (req.body.assigneeUserId !== undefined && req.body.assigneeUserId !== existing.assigneeUserId);
+      (effectiveBody.assigneeAgentId !== undefined && effectiveBody.assigneeAgentId !== existing.assigneeAgentId) ||
+      (effectiveBody.assigneeUserId !== undefined && effectiveBody.assigneeUserId !== existing.assigneeUserId);
 
     const isAgentReturningIssueToCreator =
       req.actor.type === "agent" &&
       !!req.actor.agentId &&
       existing.assigneeAgentId === req.actor.agentId &&
-      req.body.assigneeAgentId === null &&
-      typeof req.body.assigneeUserId === "string" &&
+      effectiveBody.assigneeAgentId === null &&
+      typeof effectiveBody.assigneeUserId === "string" &&
       !!existing.createdByUserId &&
-      req.body.assigneeUserId === existing.createdByUserId;
+      effectiveBody.assigneeUserId === existing.createdByUserId;
 
     if (assigneeWillChange) {
       if (!isAgentReturningIssueToCreator) {
@@ -457,7 +494,7 @@ export function issueRoutes(db: Db, storage: StorageService) {
     }
     if (!(await assertAgentRunCheckoutOwnership(req, res, existing))) return;
 
-    const { comment: commentBody, hiddenAt: hiddenAtRaw, ...updateFields } = req.body;
+    const { comment: commentBody, hiddenAt: hiddenAtRaw, ...updateFields } = effectiveBody;
     if (hiddenAtRaw !== undefined) {
       updateFields.hiddenAt = hiddenAtRaw ? new Date(hiddenAtRaw) : null;
     }
@@ -483,9 +520,9 @@ export function issueRoutes(db: Db, storage: StorageService) {
             companyId: existing.companyId,
             assigneePatch: {
               assigneeAgentId:
-                req.body.assigneeAgentId === undefined ? "__omitted__" : req.body.assigneeAgentId,
+                effectiveBody.assigneeAgentId === undefined ? "__omitted__" : effectiveBody.assigneeAgentId,
               assigneeUserId:
-                req.body.assigneeUserId === undefined ? "__omitted__" : req.body.assigneeUserId,
+                effectiveBody.assigneeUserId === undefined ? "__omitted__" : effectiveBody.assigneeUserId,
             },
             currentAssignee: {
               assigneeAgentId: existing.assigneeAgentId,
@@ -656,6 +693,7 @@ export function issueRoutes(db: Db, storage: StorageService) {
     const actor = getActorInfo(req);
     const reopenRequested = req.body.reopen === true;
     const interruptRequested = req.body.interrupt === true;
+    const assignDirective = parseAssignDirective(req.body.body);
     const isClosed = issue.status === "done" || issue.status === "cancelled";
     let reopened = false;
     let reopenFromStatus: string | null = null;
@@ -735,6 +773,52 @@ export function issueRoutes(db: Db, storage: StorageService) {
           });
         }
       }
+    }
+
+    if (assignDirective) {
+      const resolved = await agentsSvc.resolveByReference(issue.companyId, assignDirective.agentReference);
+      if (resolved.ambiguous) {
+        throw unprocessable("Assignment directive matches multiple agents. Use a unique agent shortname.");
+      }
+      if (!resolved.agent) {
+        throw unprocessable("Assignment directive target not found.");
+      }
+      const directiveAssigneeAgentId = resolved.agent.id;
+      const assigneeWillChange =
+        directiveAssigneeAgentId !== currentIssue.assigneeAgentId || currentIssue.assigneeUserId !== null;
+      if (assigneeWillChange) {
+        await assertCanAssignTasks(req, currentIssue.companyId);
+      }
+
+      let mentionedIds: string[] = [];
+      try {
+        mentionedIds = await svc.findMentionedAgents(issue.companyId, req.body.body);
+      } catch (err) {
+        logger.warn({ err, issueId: id }, "failed to resolve @-mentions");
+      }
+
+      const updated = await issueCommands.updateIssue(
+        id,
+        {
+          assigneeAgentId: directiveAssigneeAgentId,
+          assigneeUserId: null,
+        },
+        actor,
+        {
+          comment: req.body.body,
+          mentionedAgentIds: mentionedIds,
+          details: {
+            ...(reopened ? { reopened: true, reopenedFrom: reopenFromStatus, source: "comment" } : {}),
+            ...(interruptedRunId ? { interruptedRunId } : {}),
+          },
+        },
+      );
+      if (!updated?.comment) {
+        res.status(500).json({ error: "Failed to add comment" });
+        return;
+      }
+      res.status(201).json(updated.comment);
+      return;
     }
 
     const comment = await svc.addComment(id, req.body.body, {

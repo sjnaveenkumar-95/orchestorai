@@ -40,6 +40,7 @@ import {
 import { logger } from "../middleware/logger.js";
 
 export function agentRoutes(db: Db) {
+  const DEFAULT_HEARTBEAT_RUN_LIST_LIMIT = 200;
   const DEFAULT_INSTRUCTIONS_PATH_KEYS: Record<string, string> = {
     claude_local: "instructionsFilePath",
     codex_local: "instructionsFilePath",
@@ -1269,7 +1270,10 @@ export function agentRoutes(db: Db) {
     assertCompanyAccess(req, companyId);
     const agentId = req.query.agentId as string | undefined;
     const limitParam = req.query.limit as string | undefined;
-    const limit = limitParam ? Math.max(1, Math.min(1000, parseInt(limitParam, 10) || 200)) : undefined;
+    const parsedLimit = limitParam
+      ? (parseInt(limitParam, 10) || 200)
+      : DEFAULT_HEARTBEAT_RUN_LIST_LIMIT;
+    const limit = Math.max(1, Math.min(1000, parsedLimit));
     const runs = await heartbeat.list(companyId, agentId, limit);
     res.json(runs);
   });

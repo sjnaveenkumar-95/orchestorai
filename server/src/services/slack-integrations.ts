@@ -76,6 +76,24 @@ type SlackControlMessageFile = {
   permalink?: string;
 };
 
+type SlackSummaryIssue = {
+  identifier?: string | null;
+  title?: string | null;
+  status?: string | null;
+  priority?: string | null;
+  description?: string | null;
+  assigneeAgentId?: string | null;
+  updatedAt?: string | Date | null;
+  createdAt?: string | Date | null;
+  hiddenAt?: string | Date | null;
+};
+
+type SlackQueryLinkedIssue = SlackSummaryIssue & {
+  id: string;
+  projectId?: string | null;
+  parentId?: string | null;
+};
+
 type SlackControlMessageEvent = {
   type: string;
   channel?: string;
@@ -490,6 +508,56 @@ function collapseWhitespace(value: string) {
     .trim();
 }
 
+function humanizeToken(value: string | Date | null | undefined) {
+  return String(value || "unknown")
+    .replace(/_/g, " ")
+    .trim();
+}
+
+function truncateTextValue(value: string | null | undefined, max = 140) {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.length <= max) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(0, max - 3)).trimEnd()}...`;
+}
+
+function finishSentence(value: string | null | undefined) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  return /[.!?]$/.test(normalized) ? normalized : `${normalized}.`;
+}
+
+function extractIssueBrief(description: string | null | undefined) {
+  const lines = String(description || "")
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    if (
+      line.startsWith("```") ||
+      /^#{1,6}\s/.test(line) ||
+      /^[-*]\s/.test(line) ||
+      /^\d+\.\s/.test(line) ||
+      /^source\s*:/i.test(line)
+    ) {
+      continue;
+    }
+    const cleaned = truncateTextValue(line.replace(/`/g, ""), 180);
+    if (cleaned) {
+      return cleaned;
+    }
+  }
+  return "";
+}
+
 function formatSlackControlFileLabel(file: SlackControlMessageFile) {
   const name = readNonEmptyString(file.name) ?? readNonEmptyString(file.title) ?? readNonEmptyString(file.id) ?? "unnamed file";
   const parts = uniqueStrings([readNonEmptyString(file.pretty_type), readNonEmptyString(file.mimetype)]);
@@ -535,6 +603,151 @@ export function isSupportedSlackControlSubtype(subtype: string | null | undefine
     return true;
   }
   return SUPPORTED_SLACK_CONTROL_SUBTYPES.has(normalized);
+}
+
+function sortIssuesByRecentUpdate(issues: SlackSummaryIssue[]) {
+  return [...issues].sort((left, right) => {
+    const leftValue = new Date(left.updatedAt || left.createdAt || 0).getTime();
+    const rightValue = new Date(right.updatedAt || right.createdAt || 0).getTime();
+    return rightValue - leftValue;
+  });
+}
+
+function formatOverviewIssueEntry(issue: SlackSummaryIssue, agentsById: Map<string, string>) {
+  const identifier = String(issue.identifier || "").trim();
+  const title = truncateTextValue(issue.title || "Untitled issue", 90);
+  const status = humanizeToken(issue.status);
+  const assigneeName = issue.assigneeAgentId ? agentsById.get(String(issue.assigneeAgentId)) || "" : "";
+  const details = [status];
+  if (assigneeName) {
+    details.push(assigneeName);
+  }
+  const label = identifier ? `${identifier} ${title}` : title;
+  return `${label} (${details.join(", ")})`;
+}
+
+export function buildSlackIssueSummary(input: {
+  issue: SlackSummaryIssue | null | undefined;
+  assigneeName?: string;
+  projectName?: string;
+  parentIdentifier?: string;
+}) {
+  const identifier = String(input.issue?.identifier || "OrchestorAI issue").trim();
+  const title = truncateTextValue(input.issue?.title || "Untitled issue", 140);
+  const statusParts = [
+    `Status: ${humanizeToken(input.issue?.status)}`,
+    `Priority: ${humanizeToken(input.issue?.priority)}`,
+    `Assignee: ${input.assigneeName || "unassigned"}`,
+  ];
+  if (input.projectName) {
+    statusParts.push(`Project: ${input.projectName}`);
+  }
+
+  const brief = extractIssueBrief(input.issue?.description);
+  const contextParts = [];
+  if (input.parentIdentifier) {
+    contextParts.push(`Parent: ${input.parentIdentifier}`);
+  }
+  if (brief) {
+    contextParts.push(`Brief: ${brief}`);
+  }
+  if (contextParts.length === 0) {
+    contextParts.push(`Updated: ${humanizeToken(input.issue?.updatedAt || input.issue?.createdAt || "unknown")}`);
+  }
+
+  return [
+    "*Summary*",
+    `- ${identifier}: ${title}`,
+    `- ${finishSentence(statusParts.join(". "))}`,
+    `- ${finishSentence(contextParts.join(". "))}`,
+  ].join("\n");
+}
+
+export function buildSlackProjectOverviewSummary(input: {
+  issues: SlackSummaryIssue[];
+  agentsById?: Map<string, string>;
+  projectName?: string;
+  scopeLabel?: string;
+}) {
+  const visibleIssues = (input.issues || []).filter((issue) => !issue.hiddenAt);
+  const scope = input.projectName
+    ? `in ${input.projectName}`
+    : input.scopeLabel
+      ? `for ${input.scopeLabel}`
+      : "in OrchestorAI";
+
+  if (visibleIssues.length === 0) {
+    return `*Summary*\n- No tickets found ${scope}.`;
+  }
+
+  const counts = new Map<string, number>();
+  for (const issue of visibleIssues) {
+    const key = String(issue.status || "unknown").trim() || "unknown";
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const orderedStatuses = ["todo", "in_progress", "in_review", "blocked", "done", "cancelled"];
+  const countSummary = [
+    ...orderedStatuses.filter((status) => counts.has(status)).map((status) => `${counts.get(status)} ${humanizeToken(status)}`),
+    ...Array.from(counts.entries())
+      .filter(([status]) => !orderedStatuses.includes(status))
+      .map(([status, count]) => `${count} ${humanizeToken(status)}`),
+  ].join(", ");
+
+  const agentsById = input.agentsById ?? new Map<string, string>();
+  const openIssues = sortIssuesByRecentUpdate(
+    visibleIssues.filter((issue) => !["done", "cancelled"].includes(String(issue.status || ""))),
+  );
+  const completedIssues = sortIssuesByRecentUpdate(
+    visibleIssues.filter((issue) => String(issue.status || "") === "done"),
+  );
+
+  const activeLine =
+    openIssues.length > 0
+      ? `- Active: ${openIssues.slice(0, 3).map((issue) => formatOverviewIssueEntry(issue, agentsById)).join("; ")}`
+      : "- Active: none right now.";
+  const completedLine =
+    completedIssues.length > 0
+      ? `- Recent completions: ${completedIssues
+          .slice(0, 2)
+          .map((issue) => formatOverviewIssueEntry(issue, agentsById))
+          .join("; ")}`
+      : "- Recent completions: none yet.";
+
+  return [
+    "*Summary*",
+    `- ${visibleIssues.length} tickets ${scope}: ${countSummary}.`,
+    activeLine,
+    completedLine,
+  ].join("\n");
+}
+
+export function buildSlackControlQueryReply(input: {
+  linkedIssue?: SlackSummaryIssue | null;
+  assigneeName?: string;
+  parentIdentifier?: string;
+  projectName?: string;
+  issues?: SlackSummaryIssue[];
+  agentsById?: Map<string, string>;
+  fallbackReply?: string;
+}) {
+  if (input.linkedIssue) {
+    return buildSlackIssueSummary({
+      issue: input.linkedIssue,
+      assigneeName: input.assigneeName,
+      projectName: input.projectName,
+      parentIdentifier: input.parentIdentifier,
+    });
+  }
+
+  if (input.projectName && input.issues) {
+    return buildSlackProjectOverviewSummary({
+      projectName: input.projectName,
+      issues: input.issues,
+      agentsById: input.agentsById ?? new Map<string, string>(),
+    });
+  }
+
+  return String(input.fallbackReply || "").trim();
 }
 
 function extractSlackMentionIds(text: string) {
@@ -1932,6 +2145,54 @@ export function slackIntegrationService(db: Db) {
     };
   }
 
+  async function buildSlackQueryReplyForContext(input: {
+    companyId: string;
+    linkedIssue: SlackQueryLinkedIssue | null;
+    resolvedProject: SlackInterpreterCandidateProject | null;
+    fallbackReply: string;
+  }) {
+    const agents = await agentsSvc.list(input.companyId, { includeTerminated: true });
+    const agentsById = new Map(
+      agents.map((agent) => [agent.id, agent.name] as const),
+    );
+
+    let parentIdentifier = "";
+    if (input.linkedIssue?.parentId) {
+      const parentIssue = await issuesSvc.getById(input.linkedIssue.parentId);
+      parentIdentifier = String(parentIssue?.identifier || "").trim();
+    }
+
+    if (input.linkedIssue) {
+      const assigneeName = input.linkedIssue.assigneeAgentId
+        ? agentsById.get(input.linkedIssue.assigneeAgentId) || ""
+        : "";
+      return buildSlackControlQueryReply({
+        linkedIssue: input.linkedIssue,
+        assigneeName,
+        parentIdentifier,
+        projectName: input.resolvedProject?.name || "",
+        agentsById,
+        fallbackReply: input.fallbackReply,
+      });
+    }
+
+    if (input.resolvedProject) {
+      const issues = await issuesSvc.list(input.companyId, {
+        projectId: input.resolvedProject.id,
+      });
+      return buildSlackControlQueryReply({
+        projectName: input.resolvedProject.name,
+        issues,
+        agentsById,
+        fallbackReply: input.fallbackReply,
+      });
+    }
+
+    return buildSlackControlQueryReply({
+      fallbackReply: input.fallbackReply,
+    });
+  }
+
   async function executeSlackAction(input: {
     projectChannel: typeof projectSlackChannels.$inferSelect;
     threadLink: SlackThreadLink | null;
@@ -1953,6 +2214,10 @@ export function slackIntegrationService(db: Db) {
     const agentRef = mutation?.assigneeAgentRef ?? input.interpretation.targetAgentRef;
     const projectRef = mutation?.projectRef ?? input.interpretation.targetProjectRef;
     const linkedIssue = input.threadLink ? await issuesSvc.getById(input.threadLink.issueId) : null;
+    const resolvedProject =
+      resolveProjectReference(projectRef, input.candidateProjects, input.mappedProjects)
+      ?? input.candidateProjects.find((project) => project.id === input.projectChannel.projectId)
+      ?? null;
 
     if (
       actionType === "clarify" ||
@@ -1971,7 +2236,24 @@ export function slackIntegrationService(db: Db) {
       };
     }
 
-    if (actionType === "query" || actionType === "noop") {
+    if (actionType === "query") {
+      return {
+        status: "executed",
+        slackReply: await buildSlackQueryReplyForContext({
+          companyId: input.projectChannel.companyId,
+          linkedIssue,
+          resolvedProject,
+          fallbackReply: input.interpretation.slackReply,
+        }),
+        issue: toSlackIssue(linkedIssue),
+        canonicalLink: input.threadLink,
+        executionResult: {
+          actionType,
+        },
+      };
+    }
+
+    if (actionType === "noop") {
       return {
         status: "ignored",
         slackReply: input.interpretation.slackReply,
@@ -1984,10 +2266,6 @@ export function slackIntegrationService(db: Db) {
     }
 
     const resolvedAgent = resolveAgentReference(agentRef, input.candidateAgents, input.mappedAgents);
-    const resolvedProject =
-      resolveProjectReference(projectRef, input.candidateProjects, input.mappedProjects)
-      ?? input.candidateProjects.find((project) => project.id === input.projectChannel.projectId)
-      ?? null;
     const resolvedIssue = await resolveIssueReference(issueRef, {
       companyId: input.projectChannel.companyId,
       linkedIssue,
