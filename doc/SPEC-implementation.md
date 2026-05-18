@@ -207,6 +207,7 @@ Invariant: at least one root `company` level goal per company.
 - `issue_number` int null
 - `identifier` text null, globally unique
 - `started_at` timestamptz null
+- `eta_at` timestamptz null (`null` renders as `TBD`; stores expected completion timestamp, not duration)
 - `completed_at` timestamptz null
 - `cancelled_at` timestamptz null
 
@@ -455,6 +456,18 @@ All endpoints are under `/api` and return JSON.
 - `GET /issues/:issueId/attachments`
 - `GET /attachments/:attachmentId/content`
 - `DELETE /attachments/:attachmentId`
+
+ETA behavior:
+
+- new issues default `eta_at` to `null` and the UI renders that as `TBD`
+- board can edit ETA at any time
+- agents may set the initial ETA only after analysis through the normal issue update path when their role/title policy allows it
+- the active assignee may update ETA while owning an `in_progress` issue
+- ETA updates flow through normal issue activity and Slack thread updates; no dedicated ETA transport exists in V1
+- `GET /companies/:companyId/issues` accepts optional `sort=eta_urgency|priority`
+- default issue-list ordering is `eta_urgency` unless a search query omits `sort`, in which case search relevance stays first
+- `eta_urgency` orders non-terminal ETA-bearing issues by earliest ETA first, then `TBD` non-terminal issues by manual priority, then terminal issues by most recent update
+- Codex-local heartbeats may use literal `spawn subagents <issue-identifiers> ...` as a prompt-only convention when assigned ETA-bearing issues conflict; if no parallel branch is created, they continue in serial ETA order
 
 ### 10.4.1 Atomic Checkout Contract
 

@@ -17,7 +17,14 @@ import {
   projectWorkspaces,
   projects,
 } from "@orchestorai/db";
-import { deriveProjectIssuePrefixBase, extractProjectMentionIds } from "@orchestorai/shared";
+import {
+  DEFAULT_ISSUE_LIST_SORT,
+  deriveProjectIssuePrefixBase,
+  extractProjectMentionIds,
+  sortIssuesByListSort,
+  type IssueListSort,
+  type IssueListSortable,
+} from "@orchestorai/shared";
 import { conflict, notFound, unprocessable } from "../errors.js";
 
 const ALL_ISSUE_STATUSES = ["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"];
@@ -56,6 +63,7 @@ export interface IssueFilters {
   projectId?: string;
   labelId?: string;
   q?: string;
+  sort?: IssueListSort;
 }
 
 type IssueRow = typeof issues.$inferSelect;
@@ -93,6 +101,13 @@ const TERMINAL_HEARTBEAT_RUN_STATUSES = new Set(["succeeded", "failed", "cancell
 
 function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, "\\$&");
+}
+
+export function sortIssuesForList<T extends IssueListSortable>(
+  issues: T[],
+  sort: IssueListSort = DEFAULT_ISSUE_LIST_SORT,
+) {
+  return sortIssuesByListSort(issues, sort);
 }
 
 function touchedByUserCondition(companyId: string, userId: string) {
@@ -569,6 +584,9 @@ export function issueService(db: Db) {
       const contextUserId = unreadForUserId ?? touchedByUserId;
       const rawSearch = filters?.q?.trim() ?? "";
       const hasSearch = rawSearch.length > 0;
+      const requestedSort = filters?.sort;
+      const useSearchRelevance = hasSearch && !requestedSort;
+      const effectiveSort = requestedSort ?? DEFAULT_ISSUE_LIST_SORT;
       const escapedSearch = hasSearch ? escapeLikePattern(rawSearch) : "";
       const startsWithPattern = `${escapedSearch}%`;
       const containsPattern = `%${escapedSearch}%`;
@@ -623,7 +641,6 @@ export function issueService(db: Db) {
       }
       conditions.push(isNull(issues.hiddenAt));
 
-      const priorityOrder = sql`CASE ${issues.priority} WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END`;
       const searchOrder = sql<number>`
         CASE
           WHEN ${titleStartsWithMatch} THEN 0
@@ -639,12 +656,12 @@ export function issueService(db: Db) {
         .select()
         .from(issues)
         .where(and(...conditions))
-        .orderBy(hasSearch ? asc(searchOrder) : asc(priorityOrder), asc(priorityOrder), desc(issues.updatedAt));
+        .orderBy(useSearchRelevance ? asc(searchOrder) : desc(issues.updatedAt));
       const withLabels = await withIssueLabels(db, rows);
       const runMap = await activeRunMapForIssues(db, withLabels);
       const withRuns = withActiveRuns(withLabels, runMap);
       if (!contextUserId || withRuns.length === 0) {
-        return withRuns;
+        return useSearchRelevance ? withRuns : sortIssuesForList(withRuns, effectiveSort);
       }
 
       const issueIds = withRuns.map((row) => row.id);
@@ -687,7 +704,7 @@ export function issueService(db: Db) {
       const statsByIssueId = new Map(statsRows.map((row) => [row.issueId, row]));
       const readByIssueId = new Map(readRows.map((row) => [row.issueId, row.myLastReadAt]));
 
-      return withRuns.map((row) => ({
+      const enriched = withRuns.map((row) => ({
         ...row,
         ...deriveIssueUserContext(row, contextUserId, {
           myLastCommentAt: statsByIssueId.get(row.id)?.myLastCommentAt ?? null,
@@ -695,6 +712,7 @@ export function issueService(db: Db) {
           lastExternalCommentAt: statsByIssueId.get(row.id)?.lastExternalCommentAt ?? null,
         }),
       }));
+      return useSearchRelevance ? enriched : sortIssuesForList(enriched, effectiveSort);
     },
 
     countUnreadTouchedByUser: async (companyId: string, userId: string, status?: string) => {

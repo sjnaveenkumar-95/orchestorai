@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildSlackIssueRootMessage,
   buildSlackControlQueryReply,
   buildSlackControlMessageText,
   buildSlackIssueSummary,
@@ -65,6 +66,23 @@ describe("buildSlackIssueSummary", () => {
       }),
     ).toBe(
       "*Summary*\n- HRH-28: Refresh stale inventory warnings\n- Status: in review. Priority: high. Assignee: Michelle (SDE-2). Project: HR-System.\n- Parent: HRH-12. Brief: Follow the updated warehouse refresh plan.",
+    );
+  });
+});
+
+describe("buildSlackIssueRootMessage", () => {
+  it("includes status, priority, and TBD ETA on creation", () => {
+    expect(
+      buildSlackIssueRootMessage({
+        id: "issue-1",
+        identifier: "ETA-11",
+        title: "Add ETA support",
+        status: "todo",
+        priority: "high",
+        etaAt: null,
+      }),
+    ).toBe(
+      "OrchestorAI issue: *ETA-11 - Add ETA support*\nStatus: `todo`\nPriority: `high`\nETA: `TBD`",
     );
   });
 });

@@ -81,6 +81,7 @@ type SlackSummaryIssue = {
   title?: string | null;
   status?: string | null;
   priority?: string | null;
+  etaAt?: string | Date | null;
   description?: string | null;
   assigneeAgentId?: string | null;
   updatedAt?: string | Date | null;
@@ -123,6 +124,7 @@ type SlackIssue = {
   title: string;
   status: string;
   priority: string;
+  etaAt: Date | string | null;
   assigneeAgentId: string | null;
   assigneeUserId: string | null;
 };
@@ -835,6 +837,7 @@ function toSlackIssue(issue: SlackIssue | null | undefined): SlackIssue | null {
     title: issue.title,
     status: issue.status,
     priority: issue.priority,
+    etaAt: issue.etaAt ?? null,
     assigneeAgentId: issue.assigneeAgentId ?? null,
     assigneeUserId: issue.assigneeUserId ?? null,
   };
@@ -952,13 +955,26 @@ function issueDisplay(issue: Pick<SlackIssue, "id" | "identifier" | "title">) {
   return `${issue.identifier ?? issue.id} - ${issue.title}`;
 }
 
-function issueRootMessage(
-  issue: Pick<SlackIssue, "id" | "identifier" | "title" | "status" | "priority">,
+function formatSlackEtaValue(value: Date | string | null | undefined) {
+  if (value == null) return "TBD";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "TBD";
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const hours = String(date.getUTCHours()).padStart(2, "0");
+  const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day} ${hours}:${minutes} UTC`;
+}
+
+export function buildSlackIssueRootMessage(
+  issue: Pick<SlackIssue, "id" | "identifier" | "title" | "status" | "priority" | "etaAt">,
 ) {
   return [
     `OrchestorAI issue: *${issueDisplay(issue)}*`,
     `Status: \`${issue.status}\``,
     `Priority: \`${issue.priority}\``,
+    `ETA: \`${formatSlackEtaValue(issue.etaAt)}\``,
   ].join("\n");
 }
 
@@ -3335,7 +3351,7 @@ function parseApprovalDecision(text: string): "once" | "always" | "reject" | nul
 
     const posted = await controlClient.postMessage({
       channel: destinationChannel.channelId,
-      text: issueRootMessage(issue),
+      text: buildSlackIssueRootMessage(issue),
     });
     return activateThreadLink({
       companyId: issue.companyId,
@@ -3547,6 +3563,11 @@ function parseApprovalDecision(text: string): "once" | "always" | "reject" | nul
     }
     if (readNonEmptyString(details.priority) && details.priority !== previous.priority) {
       changes.push(`Priority: \`${previous.priority ?? "unset"}\` -> \`${details.priority}\``);
+    }
+    if (Object.prototype.hasOwnProperty.call(details, "etaAt")) {
+      changes.push(
+        `ETA: ${formatSlackEtaValue(previous.etaAt as string | Date | null | undefined)} -> ${formatSlackEtaValue(details.etaAt as string | Date | null | undefined)}`,
+      );
     }
     if (readNonEmptyString(details.title) && details.title !== previous.title) {
       changes.push(`Title: ${String(details.title)}`);

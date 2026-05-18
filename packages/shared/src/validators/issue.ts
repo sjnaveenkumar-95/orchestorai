@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ISSUE_PRIORITIES, ISSUE_STATUSES } from "../constants.js";
+import { ISSUE_LIST_SORTS, ISSUE_PRIORITIES, ISSUE_STATUSES } from "../constants.js";
 
 export const issueAssigneeAdapterOverridesSchema = z
   .object({
@@ -21,6 +21,7 @@ export const createIssueSchema = z.object({
   requestDepth: z.number().int().nonnegative().optional().default(0),
   billingCode: z.string().optional().nullable(),
   assigneeAdapterOverrides: issueAssigneeAdapterOverridesSchema.optional().nullable(),
+  etaAt: z.string().datetime().optional().nullable(),
   labelIds: z.array(z.string().uuid()).optional(),
 });
 
@@ -39,6 +40,8 @@ export const updateIssueSchema = createIssueSchema.partial().extend({
 });
 
 export type UpdateIssue = z.infer<typeof updateIssueSchema>;
+
+export const issueListSortSchema = z.enum(ISSUE_LIST_SORTS);
 
 export const checkoutIssueSchema = z.object({
   agentId: z.string().uuid(),

@@ -11,6 +11,7 @@ import {
   extractIssueIdentifiers,
   extractProjectSelectors,
   fingerprintIssueComment,
+  formatActivityNotification,
   formatChildIssueParentNotice,
   formatChildIssueThreadRootMessage,
   hasOrchestorAITrigger,
@@ -391,6 +392,22 @@ test("stripBotMention removes configured orchestorai aliases", () => {
   assert.equal(result, "please sync this for <@U123>");
 });
 
+test("formatActivityNotification includes ETA diffs", () => {
+  const message = formatActivityNotification({
+    action: "issue.updated",
+    identifier: "ETA-22",
+    actorName: "Avery",
+    details: {
+      etaAt: "2026-03-18T17:30:00.000Z",
+      _previous: {
+        etaAt: null,
+      },
+    },
+  });
+
+  assert.equal(message, "OrchestorAI ETA-22 updated: ETA TBD -> 2026-03-18 17:30 UTC.");
+});
+
 test("formatChildIssueThreadRootMessage includes parent, assignee, and project context", () => {
   const message = formatChildIssueThreadRootMessage({
     childIdentifier: "AND-9",
@@ -408,6 +425,34 @@ test("formatChildIssueThreadRootMessage includes parent, assignee, and project c
       "Title: Implement OTP/email verification gate on app restart",
       "Assignee: CTO",
       "Project: Eyalty App",
+      "ETA: TBD",
+    ].join("\n"),
+  );
+});
+
+test("formatChildIssueThreadRootMessage includes status, priority, and ETA", () => {
+  const message = formatChildIssueThreadRootMessage({
+    childIdentifier: "ETA-22",
+    parentIdentifier: "",
+    title: "Add ETA support",
+    assigneeName: "Avery",
+    projectName: "Roadmap",
+    status: "todo",
+    priority: "high",
+    etaAt: null,
+  });
+
+  assert.equal(
+    message,
+    [
+      "Created OrchestorAI issue ETA-22.",
+      "This thread will track ETA-22.",
+      "Title: Add ETA support",
+      "Assignee: Avery",
+      "Project: Roadmap",
+      "Status: todo",
+      "Priority: high",
+      "ETA: TBD",
     ].join("\n"),
   );
 });

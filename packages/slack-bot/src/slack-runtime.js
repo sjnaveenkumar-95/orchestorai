@@ -1271,6 +1271,9 @@ export class SlackRuntime {
             title: issue.title,
             assigneeName,
             projectName,
+            status: issue.status,
+            priority: issue.priority,
+            etaAt: issue.etaAt,
           }),
         );
 
@@ -1324,6 +1327,9 @@ export class SlackRuntime {
             title: issue.title,
             assigneeName,
             projectName,
+            status: issue.status,
+            priority: issue.priority,
+            etaAt: issue.etaAt,
           }),
         );
 
@@ -1363,6 +1369,9 @@ export class SlackRuntime {
           title: issue.title,
           assigneeName,
           projectName,
+          status: issue.status,
+          priority: issue.priority,
+          etaAt: issue.etaAt,
         }),
       );
 

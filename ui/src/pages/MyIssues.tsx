@@ -9,6 +9,7 @@ import { PriorityIcon } from "../components/PriorityIcon";
 import { EntityRow } from "../components/EntityRow";
 import { EmptyState } from "../components/EmptyState";
 import { PageSkeleton } from "../components/PageSkeleton";
+import { defaultIssueListViewState, sortIssuesForView } from "../lib/issue-list-sorting";
 import { formatDate } from "../lib/utils";
 import { ListTodo } from "lucide-react";
 
@@ -35,8 +36,9 @@ export function MyIssues() {
   }
 
   // Show issues that are not assigned (user-created or unassigned)
-  const myIssues = (issues ?? []).filter(
-    (i) => !i.assigneeAgentId && !["done", "cancelled"].includes(i.status)
+  const myIssues = sortIssuesForView(
+    (issues ?? []).filter((i) => !i.assigneeAgentId && !["done", "cancelled"].includes(i.status)),
+    defaultIssueListViewState,
   );
 
   return (

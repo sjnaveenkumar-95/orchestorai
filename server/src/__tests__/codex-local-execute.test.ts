@@ -141,6 +141,8 @@ describe("codex_local execute", () => {
       expect(capture.prompt).toContain("Because wake reason is issue_assigned, this run must not end as bootstrap-only output.");
       expect(capture.prompt).toContain("Never end with phrases such as 'ready for the concrete assignment'");
       expect(capture.prompt).toContain("Do not ask the user for the task again when the task is already present in OrchestorAI issue/context.");
+      expect(capture.prompt).toContain("Use ETA urgency across assigned open issues");
+      expect(capture.prompt).toContain("spawn subagents <issue-identifiers>");
       expect(capture.prompt).toContain("If a required bare binary fails with exact `command not found` or ENOENT in this local runtime");
       expect(capture.prompt).toContain("Host command fallback endpoint for this run: http://127.0.0.1:3100/api/companies/company-1/host-command-fallbacks");
       expect(capture.prompt).toContain(`Use ORCHESTORAI_AGENT_HOME=${agentHome} as the effective agent home for this run.`);

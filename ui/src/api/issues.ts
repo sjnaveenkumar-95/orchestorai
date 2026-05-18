@@ -1,4 +1,4 @@
-import type { Approval, Issue, IssueAttachment, IssueComment, IssueLabel } from "@orchestorai/shared";
+import type { Approval, Issue, IssueAttachment, IssueComment, IssueLabel, IssueListSort } from "@orchestorai/shared";
 import { api } from "./client";
 
 export const issuesApi = {
@@ -13,6 +13,7 @@ export const issuesApi = {
       unreadForUserId?: string;
       labelId?: string;
       q?: string;
+      sort?: IssueListSort;
     },
   ) => {
     const params = new URLSearchParams();
@@ -24,6 +25,7 @@ export const issuesApi = {
     if (filters?.unreadForUserId) params.set("unreadForUserId", filters.unreadForUserId);
     if (filters?.labelId) params.set("labelId", filters.labelId);
     if (filters?.q) params.set("q", filters.q);
+    if (filters?.sort) params.set("sort", filters.sort);
     const qs = params.toString();
     return api.get<Issue[]>(`/companies/${companyId}/issues${qs ? `?${qs}` : ""}`);
   },

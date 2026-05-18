@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "@/lib/router";
 import type { Issue } from "@orchestorai/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -18,7 +18,7 @@ import {
 import { StatusIcon } from "./StatusIcon";
 import { PriorityIcon } from "./PriorityIcon";
 import { Identity } from "./Identity";
-import { formatDate, cn, projectUrl } from "../lib/utils";
+import { formatDate, formatDateTime, cn, projectUrl } from "../lib/utils";
 import { timeAgo } from "../lib/timeAgo";
 import { Separator } from "@/components/ui/separator";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -29,6 +29,30 @@ interface IssuePropertiesProps {
   issue: Issue;
   onUpdate: (data: Record<string, unknown>) => void;
   inline?: boolean;
+}
+
+function toLocalDateTimeInputValue(value: Date | string | null | undefined) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const localValue = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return localValue.toISOString().slice(0, 16);
+}
+
+function formatEtaRelativeLabel(value: Date | string | null | undefined) {
+  if (!value) return "No ETA set";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "No ETA set";
+  const diffMs = date.getTime() - Date.now();
+  const formatter = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
+  const diffMinutes = Math.round(diffMs / 60_000);
+  const absMinutes = Math.abs(diffMinutes);
+  if (absMinutes < 60) return formatter.format(diffMinutes, "minute");
+  const diffHours = Math.round(diffMinutes / 60);
+  if (Math.abs(diffHours) < 48) return formatter.format(diffHours, "hour");
+  const diffDays = Math.round(diffHours / 24);
+  if (Math.abs(diffDays) < 60) return formatter.format(diffDays, "day");
+  return formatter.format(Math.round(diffDays / 30), "month");
 }
 
 function PropertyRow({ label, children }: { label: string; children: React.ReactNode }) {
@@ -114,12 +138,17 @@ export function IssueProperties({ issue, onUpdate, inline }: IssuePropertiesProp
   const [labelSearch, setLabelSearch] = useState("");
   const [newLabelName, setNewLabelName] = useState("");
   const [newLabelColor, setNewLabelColor] = useState("#6366f1");
+  const [etaDraft, setEtaDraft] = useState(() => toLocalDateTimeInputValue(issue.etaAt));
 
   const { data: session } = useQuery({
     queryKey: queryKeys.auth.session,
     queryFn: () => authApi.getSession(),
   });
   const currentUserId = session?.user?.id ?? session?.session?.userId;
+
+  useEffect(() => {
+    setEtaDraft(toLocalDateTimeInputValue(issue.etaAt));
+  }, [issue.etaAt]);
 
   const { data: agents } = useQuery({
     queryKey: queryKeys.agents.list(companyId!),
@@ -452,6 +481,17 @@ export function IssueProperties({ issue, onUpdate, inline }: IssuePropertiesProp
     </>
   );
 
+  const etaDisplay = issue.etaAt ? formatDateTime(issue.etaAt) : "TBD";
+  const etaRelative = formatEtaRelativeLabel(issue.etaAt);
+  const etaOriginalDraft = toLocalDateTimeInputValue(issue.etaAt);
+  const etaDirty = etaDraft !== etaOriginalDraft;
+  const etaDraftValid = etaDraft.length === 0 || !Number.isNaN(new Date(etaDraft).getTime());
+
+  const saveEta = () => {
+    if (!etaDraftValid || !etaDirty) return;
+    onUpdate({ etaAt: etaDraft ? new Date(etaDraft).toISOString() : null });
+  };
+
   return (
     <div className="space-y-4">
       <div className="space-y-1">
@@ -523,6 +563,50 @@ export function IssueProperties({ issue, onUpdate, inline }: IssuePropertiesProp
         >
           {projectContent}
         </PropertyPicker>
+
+        <PropertyRow label="ETA">
+          <div className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className={cn("text-sm", !issue.etaAt && "text-muted-foreground")}>{etaDisplay}</div>
+              <div className="text-xs text-muted-foreground">{etaRelative}</div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="datetime-local"
+                className="h-8 rounded border border-border bg-background px-2 text-xs"
+                value={etaDraft}
+                onChange={(e) => setEtaDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    saveEta();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="h-8 rounded border border-border px-2 text-xs hover:bg-accent/50 disabled:opacity-50"
+                disabled={!etaDirty || !etaDraftValid}
+                onClick={saveEta}
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                className="h-8 rounded border border-border px-2 text-xs hover:bg-accent/50 disabled:opacity-50"
+                disabled={!issue.etaAt && etaDraft.length === 0}
+                onClick={() => {
+                  setEtaDraft("");
+                  if (issue.etaAt) {
+                    onUpdate({ etaAt: null });
+                  }
+                }}
+              >
+                TBD
+              </button>
+            </div>
+          </div>
+        </PropertyRow>
 
         {issue.parentId && (
           <PropertyRow label="Parent">

@@ -7,6 +7,7 @@ import {
   createIssueLabelSchema,
   checkoutIssueSchema,
   createIssueSchema,
+  issueListSortSchema,
   linkIssueApprovalSchema,
   updateIssueSchema,
 } from "@orchestorai/shared";
@@ -35,6 +36,28 @@ const ALLOWED_ATTACHMENT_CONTENT_TYPES = new Set([
   "image/webp",
   "image/gif",
 ]);
+const ETA_TITLE_ALLOWLIST = new Set(["sm", "scrum master", "architect", "senior dev", "senior developer"]);
+
+function normalizeAgentTitle(value: string | null | undefined) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function normalizeDatePatchValue(value: string | null | undefined) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return new Date(value);
+}
+
+function sameTimestamp(left: Date | string | null | undefined, right: Date | string | null | undefined) {
+  if (left == null && right == null) return true;
+  if (left == null || right == null) return false;
+  const leftTime = left instanceof Date ? left.getTime() : new Date(left).getTime();
+  const rightTime = right instanceof Date ? right.getTime() : new Date(right).getTime();
+  return leftTime === rightTime;
+}
 
 function parseAssignDirective(body: string): { agentReference: string } | null {
   const firstNonEmptyLine = body
@@ -123,6 +146,37 @@ export function issueRoutes(db: Db, storage: StorageService) {
     throw unauthorized();
   }
 
+  async function canAgentSetInitialEta(companyId: string, agentId: string) {
+    const actorAgent = await agentsSvc.getById(agentId);
+    if (!actorAgent || actorAgent.companyId !== companyId) {
+      return false;
+    }
+    if (actorAgent.role === "pm") {
+      return true;
+    }
+    return ETA_TITLE_ALLOWLIST.has(normalizeAgentTitle(actorAgent.title));
+  }
+
+  async function assertCanChangeEta(
+    req: Request,
+    issue: { companyId: string; status: string; assigneeAgentId: string | null; etaAt?: Date | null },
+    nextEtaAt: Date | null,
+  ) {
+    if (req.actor.type === "board") {
+      return;
+    }
+    if (req.actor.type !== "agent" || !req.actor.agentId) {
+      throw forbidden("Missing ETA permission");
+    }
+    if (issue.status === "in_progress" && issue.assigneeAgentId === req.actor.agentId) {
+      return;
+    }
+    if ((issue.etaAt ?? null) === null && await canAgentSetInitialEta(issue.companyId, req.actor.agentId)) {
+      return;
+    }
+    throw forbidden("Missing ETA permission");
+  }
+
   function requireAgentRunId(req: Request, res: Response) {
     if (req.actor.type !== "agent") return null;
     const runId = req.actor.runId?.trim();
@@ -202,6 +256,7 @@ export function issueRoutes(db: Db, storage: StorageService) {
   router.get("/companies/:companyId/issues", async (req, res) => {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
+    const sortRaw = req.query.sort as string | undefined;
     const assigneeUserFilterRaw = req.query.assigneeUserId as string | undefined;
     const touchedByUserFilterRaw = req.query.touchedByUserId as string | undefined;
     const unreadForUserFilterRaw = req.query.unreadForUserId as string | undefined;
@@ -231,7 +286,13 @@ export function issueRoutes(db: Db, storage: StorageService) {
       return;
     }
 
-    const result = await svc.list(companyId, {
+    const parsedSort = sortRaw === undefined ? { success: true as const, data: undefined } : issueListSortSchema.safeParse(sortRaw);
+    if (!parsedSort.success) {
+      res.status(400).json({ error: "Invalid sort value" });
+      return;
+    }
+
+    const filters: Parameters<typeof svc.list>[1] = {
       status: req.query.status as string | undefined,
       assigneeAgentId: req.query.assigneeAgentId as string | undefined,
       assigneeUserId,
@@ -240,7 +301,12 @@ export function issueRoutes(db: Db, storage: StorageService) {
       projectId: req.query.projectId as string | undefined,
       labelId: req.query.labelId as string | undefined,
       q: req.query.q as string | undefined,
-    });
+    };
+    if (parsedSort.data) {
+      filters.sort = parsedSort.data;
+    }
+
+    const result = await svc.list(companyId, filters);
     res.json(result);
   });
 
@@ -427,10 +493,18 @@ export function issueRoutes(db: Db, storage: StorageService) {
     if (req.body.assigneeAgentId || req.body.assigneeUserId) {
       await assertCanAssignTasks(req, companyId);
     }
+    const etaAt = normalizeDatePatchValue(req.body.etaAt);
+    if (etaAt !== undefined && req.actor.type === "agent" && req.actor.agentId && etaAt !== null) {
+      const allowed = await canAgentSetInitialEta(companyId, req.actor.agentId);
+      if (!allowed) {
+        throw forbidden("Missing ETA permission");
+      }
+    }
 
     const actor = getActorInfo(req);
     const issue = await issueCommands.createIssue(companyId, {
       ...req.body,
+      ...(etaAt !== undefined ? { etaAt } : {}),
       createdByAgentId: actor.agentId,
       createdByUserId: actor.actorType === "user" ? actor.actorId : null,
     }, {
@@ -494,9 +568,16 @@ export function issueRoutes(db: Db, storage: StorageService) {
     }
     if (!(await assertAgentRunCheckoutOwnership(req, res, existing))) return;
 
-    const { comment: commentBody, hiddenAt: hiddenAtRaw, ...updateFields } = effectiveBody;
+    const { comment: commentBody, hiddenAt: hiddenAtRaw, etaAt: etaAtRaw, ...updateFields } = effectiveBody;
     if (hiddenAtRaw !== undefined) {
       updateFields.hiddenAt = hiddenAtRaw ? new Date(hiddenAtRaw) : null;
+    }
+    if (etaAtRaw !== undefined) {
+      const etaAt = normalizeDatePatchValue(etaAtRaw);
+      if (!sameTimestamp(existing.etaAt ?? null, etaAt ?? null)) {
+        await assertCanChangeEta(req, existing, etaAt ?? null);
+      }
+      updateFields.etaAt = etaAt;
     }
     let mentionedIds: string[] = [];
     if (commentBody) {

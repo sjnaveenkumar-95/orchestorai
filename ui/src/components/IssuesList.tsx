@@ -6,6 +6,7 @@ import { useCompany } from "../context/CompanyContext";
 import { issuesApi } from "../api/issues";
 import { queryKeys } from "../lib/queryKeys";
 import { groupBy } from "../lib/groupBy";
+import { defaultIssueListViewState, getIssueApiSortField, priorityOrder, sortIssuesForView, statusOrder, type IssueViewSortField } from "../lib/issue-list-sorting";
 import { formatDate, cn } from "../lib/utils";
 import { filterAssignableAgents } from "../lib/assignable-agents";
 import { StatusIcon } from "./StatusIcon";
@@ -24,9 +25,6 @@ import type { Issue } from "@orchestorai/shared";
 
 /* ── Helpers ── */
 
-const statusOrder = ["in_progress", "todo", "backlog", "in_review", "blocked", "done", "cancelled"];
-const priorityOrder = ["critical", "high", "medium", "low"];
-
 function statusLabel(status: string): string {
   return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
@@ -38,7 +36,7 @@ export type IssueViewState = {
   priorities: string[];
   assignees: string[];
   labels: string[];
-  sortField: "status" | "priority" | "title" | "created" | "updated";
+  sortField: IssueViewSortField;
   sortDir: "asc" | "desc";
   groupBy: "status" | "priority" | "assignee" | "none";
   viewMode: "list" | "board";
@@ -50,8 +48,8 @@ const defaultViewState: IssueViewState = {
   priorities: [],
   assignees: [],
   labels: [],
-  sortField: "updated",
-  sortDir: "desc",
+  sortField: defaultIssueListViewState.sortField,
+  sortDir: defaultIssueListViewState.sortDir,
   groupBy: "none",
   viewMode: "list",
   collapsedGroups: [],
@@ -94,28 +92,6 @@ function applyFilters(issues: Issue[], state: IssueViewState): Issue[] {
   if (state.assignees.length > 0) result = result.filter((i) => i.assigneeAgentId != null && state.assignees.includes(i.assigneeAgentId));
   if (state.labels.length > 0) result = result.filter((i) => (i.labelIds ?? []).some((id) => state.labels.includes(id)));
   return result;
-}
-
-function sortIssues(issues: Issue[], state: IssueViewState): Issue[] {
-  const sorted = [...issues];
-  const dir = state.sortDir === "asc" ? 1 : -1;
-  sorted.sort((a, b) => {
-    switch (state.sortField) {
-      case "status":
-        return dir * (statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status));
-      case "priority":
-        return dir * (priorityOrder.indexOf(a.priority) - priorityOrder.indexOf(b.priority));
-      case "title":
-        return dir * a.title.localeCompare(b.title);
-      case "created":
-        return dir * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-      case "updated":
-        return dir * (new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime());
-      default:
-        return 0;
-    }
-  });
-  return sorted;
 }
 
 function countActiveFilters(state: IssueViewState): number {
@@ -211,9 +187,15 @@ export function IssuesList({
     });
   }, [scopedKey]);
 
+  const apiSort = getIssueApiSortField(viewState.sortField);
+
   const { data: searchedIssues = [] } = useQuery({
-    queryKey: queryKeys.issues.search(selectedCompanyId!, normalizedIssueSearch, projectId),
-    queryFn: () => issuesApi.list(selectedCompanyId!, { q: normalizedIssueSearch, projectId }),
+    queryKey: queryKeys.issues.search(selectedCompanyId!, normalizedIssueSearch, projectId, apiSort),
+    queryFn: () => issuesApi.list(selectedCompanyId!, {
+      q: normalizedIssueSearch,
+      projectId,
+      ...(apiSort ? { sort: apiSort } : {}),
+    }),
     enabled: !!selectedCompanyId && normalizedIssueSearch.length > 0,
   });
 
@@ -225,7 +207,7 @@ export function IssuesList({
   const filtered = useMemo(() => {
     const sourceIssues = normalizedIssueSearch.length > 0 ? searchedIssues : issues;
     const filteredByControls = applyFilters(sourceIssues, viewState);
-    return sortIssues(filteredByControls, viewState);
+    return sortIssuesForView(filteredByControls, viewState);
   }, [issues, searchedIssues, viewState, normalizedIssueSearch]);
 
   const { data: labels } = useQuery({
@@ -493,6 +475,7 @@ export function IssuesList({
               <PopoverContent align="end" className="w-48 p-0">
                 <div className="p-2 space-y-0.5">
                   {([
+                    ["eta_urgency", "ETA urgency"],
                     ["status", "Status"],
                     ["priority", "Priority"],
                     ["title", "Title"],

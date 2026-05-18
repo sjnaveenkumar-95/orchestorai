@@ -33,6 +33,38 @@ function dedupeAgentIds(values: Array<string | null | undefined>) {
   return Array.from(new Set(values.filter((value): value is string => Boolean(value))));
 }
 
+function isDateValue(value: unknown): value is Date {
+  return value instanceof Date && !Number.isNaN(value.getTime());
+}
+
+function isSameActivityValue(left: unknown, right: unknown) {
+  if (isDateValue(left) && isDateValue(right)) {
+    return left.getTime() === right.getTime();
+  }
+  return left === right;
+}
+
+function serializeActivityValue(value: unknown): unknown {
+  if (isDateValue(value)) {
+    return value.toISOString();
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => serializeActivityValue(entry));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, serializeActivityValue(entry)]),
+    );
+  }
+  return value;
+}
+
+function serializeActivityDetails(details: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(details).map(([key, value]) => [key, serializeActivityValue(value)]),
+  );
+}
+
 export function issueCommandService(db: Db) {
   const issuesSvc = issueService(db);
   const heartbeat = heartbeatService(db);
@@ -98,11 +130,21 @@ export function issueCommandService(db: Db) {
       for (const key of Object.keys(updateFields)) {
         if (
           key in existing &&
-          (existing as Record<string, unknown>)[key] !== (updateFields as Record<string, unknown>)[key]
+          !isSameActivityValue(
+            (existing as Record<string, unknown>)[key],
+            (updateFields as Record<string, unknown>)[key],
+          )
         ) {
           previous[key] = (existing as Record<string, unknown>)[key];
         }
       }
+
+      const activityDetails = serializeActivityDetails({
+        ...updateFields,
+        identifier: issue.identifier,
+        _previous: Object.keys(previous).length > 0 ? previous : undefined,
+        ...(metadata.details ?? {}),
+      });
 
       await logActivity(db, {
         companyId: issue.companyId,
@@ -113,12 +155,7 @@ export function issueCommandService(db: Db) {
         action: "issue.updated",
         entityType: "issue",
         entityId: issue.id,
-        details: {
-          ...updateFields,
-          identifier: issue.identifier,
-          _previous: Object.keys(previous).length > 0 ? previous : undefined,
-          ...(metadata.details ?? {}),
-        },
+        details: activityDetails,
       });
 
       let comment = null;

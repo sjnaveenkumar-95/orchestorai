@@ -89,6 +89,7 @@ export {
   createIssueSchema,
   createIssueLabelSchema,
   updateIssueSchema,
+  issueListSortSchema,
   checkoutIssueSchema,
   addIssueCommentSchema,
   linkIssueApprovalSchema,

@@ -185,6 +185,11 @@ function renderOrchestorAIHeartbeatBrief(params: {
   lines.push("", "Execution requirements:");
   lines.push("- Start with OrchestorAI identity/context and assignment handling, then checkout or respond through OrchestorAI before doing any other work.");
   lines.push("- Use OrchestorAI APIs for identity lookup, assignment lookup, checkout, comments, and status updates.");
+  lines.push("- When working against an OrchestorAI issue, read the current ETA first. New issues may show ETA as empty/TBD.");
+  lines.push("- Use ETA urgency across assigned open issues. Earlier ETA outranks later ETA, and ETA-bearing work outranks TBD work. If ETA is missing, fall back to manual priority.");
+  lines.push("- If you are allowed to set the initial ETA after analysis, do so through the normal issue update path.");
+  lines.push("- If you own the in_progress issue, keep ETA current while you work. Update it when the forecast changes meaningfully (about 15 minutes or more) or when status shifts materially.");
+  lines.push("- If two or more assigned, non-blocked open issues have conflicting ETAs, use literal `spawn subagents <issue-identifiers> ...` to branch the work when your runtime supports subagents. If branching is unavailable, continue in serial ETA order.");
   if (hostCommandFallbackUrl) {
     lines.push("- If a required bare binary fails with exact `command not found` or ENOENT in this local runtime, do not stop at reporting the blocker.");
     lines.push("- Immediately request a host command fallback through ORCHESTORAI_HOST_COMMAND_FALLBACK_URL using the same binary, args, cwd, issue ID, and first local error line, then wait for approval or result instead of retrying locally.");
@@ -207,9 +212,9 @@ function renderOrchestorAIHeartbeatBrief(params: {
     lines.push("- For this wake, do one of the following before exiting:");
     lines.push("  1. checkout the task and begin work,");
     lines.push("  2. update/comment and mark it blocked with a concrete unblock owner, or");
-    lines.push("  3. explain via a OrchestorAI comment or status update that a higher-priority in_progress assignment was handled first.");
+    lines.push("  3. explain via a OrchestorAI comment or status update that a nearer-ETA assignment was handled first.");
   } else {
-    lines.push("- If no direct task context is provided, run the normal heartbeat workflow and select assigned in_progress work before todo work.");
+    lines.push("- If no direct task context is provided, run the normal heartbeat workflow and use ETA urgency across assigned open issues.");
   }
 
   return `${lines.join("\n")}\n\n`;

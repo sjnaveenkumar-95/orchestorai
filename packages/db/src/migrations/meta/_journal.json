@@ -253,6 +253,13 @@
       "when": 1773410678210,
       "tag": "0035_far_stellaris",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1773840817266,
+      "tag": "0036_worthless_stature",
+      "breakpoints": true
     }
   ]
 }

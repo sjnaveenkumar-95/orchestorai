@@ -110,6 +110,22 @@ function resolveClaudeBillingType(env: Record<string, string>): "api" | "subscri
   return hasNonEmptyEnvValue(env, "ANTHROPIC_API_KEY") ? "api" : "subscription";
 }
 
+function buildEtaMaintenancePrompt(env: Record<string, string>) {
+  const hasIssueContext = hasNonEmptyEnvValue(env, "ORCHESTORAI_TASK_ID") || hasNonEmptyEnvValue(env, "ORCHESTORAI_LINKED_ISSUE_IDS");
+  if (!hasIssueContext) {
+    return "";
+  }
+  return [
+    "OrchestorAI ETA directive:",
+    "- Read the issue ETA before starting work. New issues may show ETA as empty/TBD.",
+    "- Use ETA urgency across assigned open issues. Earlier ETA outranks later ETA, and ETA-bearing work outranks TBD work. If ETA is missing, fall back to manual priority.",
+    "- If you are allowed to set the first ETA after analysis, do that through the normal issue update API.",
+    "- If you own the in_progress issue, keep ETA current while working and update it whenever the forecast shifts by roughly 15 minutes or the work status changes materially.",
+    "- If your runtime does not parallelize the work, continue in serial ETA order.",
+    "",
+  ].join("\n");
+}
+
 async function buildClaudeRuntimeConfig(input: ClaudeExecutionInput): Promise<ClaudeRuntimeConfig> {
   const { runId, agent, context, authToken } = input;
   const config = normalizeLegacyLocalAdapterConfig(input.config);
@@ -339,7 +355,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       `[orchestorai] Claude session "${runtimeSessionId}" was saved for cwd "${runtimeSessionCwd}" and will not be resumed in "${cwd}".\n`,
     );
   }
-  const prompt = renderTemplate(promptTemplate, {
+  const prompt = `${buildEtaMaintenancePrompt(env)}${renderTemplate(promptTemplate, {
     agentId: agent.id,
     companyId: agent.companyId,
     runId,
@@ -347,7 +363,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     agent,
     run: { id: runId, source: "on_demand" },
     context,
-  });
+  })}`;
 
   const buildClaudeArgs = (resumeSessionId: string | null) => {
     const args = ["--print", "-", "--output-format", "stream-json", "--verbose"];

@@ -1,3 +1,5 @@
+import type { IssueListSort } from "@orchestorai/shared";
+
 export const queryKeys = {
   companies: {
     all: ["companies"] as const,
@@ -17,8 +19,8 @@ export const queryKeys = {
   },
   issues: {
     list: (companyId: string) => ["issues", companyId] as const,
-    search: (companyId: string, q: string, projectId?: string) =>
-      ["issues", companyId, "search", q, projectId ?? "__all-projects__"] as const,
+    search: (companyId: string, q: string, projectId?: string, sort?: IssueListSort) =>
+      ["issues", companyId, "search", q, projectId ?? "__all-projects__", sort ?? "__default__"] as const,
     listAssignedToMe: (companyId: string) => ["issues", companyId, "assigned-to-me"] as const,
     listTouchedByMe: (companyId: string) => ["issues", companyId, "touched-by-me"] as const,
     listUnreadTouchedByMe: (companyId: string) => ["issues", companyId, "unread-touched-by-me"] as const,

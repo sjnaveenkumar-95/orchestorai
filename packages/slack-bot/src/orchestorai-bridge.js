@@ -1074,24 +1074,21 @@ export function buildIssueDescription(input) {
 export function summarizeIssueUpdate(details) {
   const payload = details && typeof details === "object" ? details : {};
   const parts = [];
+  const previous = payload._previous && typeof payload._previous === "object"
+    ? payload._previous
+    : {};
 
   if (payload.status) {
-    const previous = payload._previous && typeof payload._previous === "object"
-      ? payload._previous.status
-      : null;
-    if (previous && previous !== payload.status) {
-      parts.push(`status ${previous} -> ${payload.status}`);
+    if (previous.status && previous.status !== payload.status) {
+      parts.push(`status ${previous.status} -> ${payload.status}`);
     } else {
       parts.push(`status ${payload.status}`);
     }
   }
 
   if (payload.priority) {
-    const previous = payload._previous && typeof payload._previous === "object"
-      ? payload._previous.priority
-      : null;
-    if (previous && previous !== payload.priority) {
-      parts.push(`priority ${previous} -> ${payload.priority}`);
+    if (previous.priority && previous.priority !== payload.priority) {
+      parts.push(`priority ${previous.priority} -> ${payload.priority}`);
     } else {
       parts.push(`priority ${payload.priority}`);
     }
@@ -1114,7 +1111,27 @@ export function summarizeIssueUpdate(details) {
     parts.push(`title "${String(payload.title).trim()}"`);
   }
 
+  if (Object.prototype.hasOwnProperty.call(payload, "etaAt")) {
+    parts.push(`ETA ${formatEtaUtc(previous.etaAt)} -> ${formatEtaUtc(payload.etaAt)}`);
+  }
+
   return parts;
+}
+
+function formatEtaUtc(value) {
+  if (value == null) {
+    return "TBD";
+  }
+  const date = value instanceof Date ? value : new Date(String(value));
+  if (Number.isNaN(date.getTime())) {
+    return "TBD";
+  }
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const hours = String(date.getUTCHours()).padStart(2, "0");
+  const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day} ${hours}:${minutes} UTC`;
 }
 
 export function formatActivityNotification({ action, identifier, details, actorName }) {
@@ -1172,6 +1189,9 @@ export function formatChildIssueThreadRootMessage({
   title,
   assigneeName,
   projectName,
+  status,
+  priority,
+  etaAt,
 }) {
   const lines = [
     parentIdentifier
@@ -1189,6 +1209,13 @@ export function formatChildIssueThreadRootMessage({
   if (projectName) {
     lines.push(`Project: ${String(projectName).trim()}`);
   }
+  if (status) {
+    lines.push(`Status: ${String(status).trim()}`);
+  }
+  if (priority) {
+    lines.push(`Priority: ${String(priority).trim()}`);
+  }
+  lines.push(`ETA: ${formatEtaUtc(etaAt)}`);
 
   return lines.join("\n");
 }

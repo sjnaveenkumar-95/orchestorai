@@ -9,6 +9,7 @@ export {
   AGENT_ICON_NAMES,
   ISSUE_STATUSES,
   ISSUE_PRIORITIES,
+  ISSUE_LIST_SORTS,
   GOAL_LEVELS,
   GOAL_STATUSES,
   PROJECT_STATUSES,
@@ -52,6 +53,7 @@ export {
   type AgentIconName,
   type IssueStatus,
   type IssuePriority,
+  type IssueListSort,
   type GoalLevel,
   type GoalStatus,
   type ProjectStatus,
@@ -230,6 +232,7 @@ export {
   createIssueSchema,
   createIssueLabelSchema,
   updateIssueSchema,
+  issueListSortSchema,
   checkoutIssueSchema,
   addIssueCommentSchema,
   linkIssueApprovalSchema,
@@ -303,6 +306,14 @@ export {
   type CompanyPortabilityPreview,
   type CompanyPortabilityImport,
 } from "./validators/index.js";
+
+export {
+  DEFAULT_ISSUE_LIST_SORT,
+  compareIssuesByListSort,
+  isIssueListSort,
+  sortIssuesByListSort,
+  type IssueListSortable,
+} from "./issue-list-sorting.js";
 
 export { API_PREFIX, API } from "./api.js";
 export { normalizeAgentUrlKey, deriveAgentUrlKey, isUuidLike } from "./agent-url-key.js";

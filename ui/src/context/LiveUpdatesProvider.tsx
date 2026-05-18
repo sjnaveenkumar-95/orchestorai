@@ -5,6 +5,7 @@ import { useCompany } from "./CompanyContext";
 import type { ToastInput } from "./ToastContext";
 import { useToast } from "./ToastContext";
 import { queryKeys } from "../lib/queryKeys";
+import { describeIssueUpdate } from "../lib/issue-update-descriptions";
 
 const TOAST_COOLDOWN_WINDOW_MS = 10_000;
 const TOAST_COOLDOWN_MAX = 3;
@@ -127,26 +128,6 @@ function resolveIssueToastContext(
 const ISSUE_TOAST_ACTIONS = new Set(["issue.created", "issue.updated", "issue.comment_added"]);
 const AGENT_TOAST_STATUSES = new Set(["running", "error"]);
 const TERMINAL_RUN_STATUSES = new Set(["succeeded", "failed", "timed_out", "cancelled"]);
-
-function describeIssueUpdate(details: Record<string, unknown> | null): string | null {
-  if (!details) return null;
-  const changes: string[] = [];
-  if (typeof details.status === "string") changes.push(`status -> ${details.status.replace(/_/g, " ")}`);
-  if (typeof details.priority === "string") changes.push(`priority -> ${details.priority}`);
-  if (typeof details.assigneeAgentId === "string" || typeof details.assigneeUserId === "string") {
-    changes.push("reassigned");
-  } else if (details.assigneeAgentId === null || details.assigneeUserId === null) {
-    changes.push("unassigned");
-  }
-  if (details.reopened === true) {
-    const from = readString(details.reopenedFrom);
-    changes.push(from ? `reopened from ${from.replace(/_/g, " ")}` : "reopened");
-  }
-  if (typeof details.title === "string") changes.push("title changed");
-  if (typeof details.description === "string") changes.push("description changed");
-  if (changes.length > 0) return changes.join(", ");
-  return null;
-}
 
 function buildActivityToast(
   queryClient: QueryClient,
@@ -350,6 +331,11 @@ function invalidateActivityQueries(
 
   if (entityType === "issue") {
     queryClient.invalidateQueries({ queryKey: queryKeys.issues.list(companyId) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.issues.listAssignedToMe(companyId) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.issues.listTouchedByMe(companyId) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.issues.listUnreadTouchedByMe(companyId) });
+    queryClient.invalidateQueries({ queryKey: ["issues", companyId, "project"] });
+    queryClient.invalidateQueries({ queryKey: ["issues", companyId, "search"] });
     if (entityId) {
       const details = readRecord(payload.details);
       const issueRefs = resolveIssueQueryRefs(queryClient, companyId, entityId, details);

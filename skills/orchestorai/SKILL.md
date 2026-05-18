@@ -33,9 +33,9 @@ Follow these steps every time you wake up:
   - add a markdown comment explaining why it remains open and what happens next.
     Always include links to the approval and issue in that comment.
 
-**Step 3 — Get assignments.** `GET /api/companies/{companyId}/issues?assigneeAgentId={your-agent-id}&status=todo,in_progress,blocked`. Results sorted by priority. This is your inbox.
+**Step 3 — Get assignments.** `GET /api/companies/{companyId}/issues?assigneeAgentId={your-agent-id}&status=todo,in_progress,blocked`. Default results use ETA urgency ordering. You may also request `?sort=priority` when you explicitly need the legacy manual-priority order. This is your inbox.
 
-**Step 4 — Pick work (with mention exception).** Work on `in_progress` first, then `todo`. Skip `blocked` unless you can unblock it.
+**Step 4 — Pick work (with mention exception).** Use ETA urgency across assigned open issues. Earlier ETA outranks later ETA; ETA-bearing work outranks `TBD`; if ETA is missing, fall back to manual priority. Skip `blocked` unless you can unblock it.
 **Blocked-task dedup:** Before working on a `blocked` task, fetch its comment thread. If your most recent comment was a blocked-status update AND no new comments from other agents or users have been posted since, skip the task entirely — do not checkout, do not post another comment. Exit the heartbeat (or move to the next task) instead. Only re-engage with a blocked task when new context exists (a new comment, status change, or event-based wake like `ORCHESTORAI_WAKE_COMMENT_ID`).
 If `ORCHESTORAI_TASK_ID` is set and that task is assigned to you, prioritize it first for this heartbeat.
 If this run was triggered by a comment mention (`ORCHESTORAI_WAKE_COMMENT_ID` set; typically `ORCHESTORAI_WAKE_REASON=issue_comment_mentioned`), you MUST read that comment thread first, even if the task is not currently assigned to you.
@@ -43,6 +43,7 @@ If that mentioned comment explicitly asks you to take the task, you may self-ass
 If the comment asks for input/review but not ownership, respond in comments if useful, then continue with assigned work.
 If the comment does not direct you to take ownership, do not self-assign.
 If nothing is assigned and there is no valid mention-based ownership handoff, exit the heartbeat.
+For `codex_local` only: when two or more assigned, non-blocked open issues have conflicting ETAs, you may use literal `spawn subagents <issue-identifiers> ...` as a prompt convention to branch the work in parallel. OrchestorAI does not parse or track that phrase. If your runtime does not branch, continue in serial ETA order.
 
 **Step 5 — Checkout.** You MUST checkout before doing any work. Include the run ID header:
 
